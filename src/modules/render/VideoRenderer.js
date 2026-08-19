@@ -13,9 +13,8 @@ export async function renderVideo({sceneFiles,sceneDurations,captions,audioPath,
   });
   if(audioPath) args.push('-i',audioPath);
 
-  // Pexels clips can have very different fps/time-bases (23.98/24/25/29.97/60 etc.).
-  // Normalize every scene BEFORE concat. Without this, concat can inherit an extreme
-  // time-base and libx264 sees an absurd effective frame rate / MB rate.
+  // Force every source onto the same 30fps / 1:30 time base before concat.
+  // Pexels sources commonly mix 23.98/25/29.97/60fps and unusual tbn values.
   const labels=sceneFiles.map((_,i)=>
     `[${i}:v]`+
     `scale=1080:1920:force_original_aspect_ratio=increase,`+
@@ -24,20 +23,21 @@ export async function renderVideo({sceneFiles,sceneDurations,captions,audioPath,
     `format=yuv420p,`+
     `setsar=1,`+
     `trim=duration=${sceneDurations[i]},`+
-    `setpts=N/(30*TB)[v${i}]`
+    `settb=expr=1/30,`+
+    `setpts=N/TB/30[v${i}]`
   ).join(';');
 
   const concat=sceneFiles.map((_,i)=>`[v${i}]`).join('')+
     `concat=n=${sceneFiles.length}:v=1:a=0[base]`;
   const escapedAss=assPath.replace(/\\/g,'/').replace(/:/g,'\\:').replace(/'/g,"\\'");
-  const filter=`${labels};${concat};[base]fps=30,subtitles='${escapedAss}'[vout]`;
+  const filter=`${labels};${concat};[base]fps=30,settb=expr=1/30,subtitles='${escapedAss}'[vout]`;
 
   args.push('-filter_complex',filter,'-map','[vout]');
   if(audioPath) args.push('-map',`${sceneFiles.length}:a`);
 
   args.push(
+    '-fps_mode','cfr',
     '-r','30',
-    '-vsync','cfr',
     '-c:v','libx264',
     '-preset','veryfast',
     '-profile:v','high',
@@ -51,6 +51,15 @@ export async function renderVideo({sceneFiles,sceneDurations,captions,audioPath,
     '-y',outputPath
   );
 
-  await execFileAsync('ffmpeg',args,{maxBuffer:20*1024*1024});
+  try {
+    await execFileAsync('ffmpeg',args,{maxBuffer:50*1024*1024});
+  } catch (err) {
+    // Preserve the useful tail of ffmpeg stderr instead of flooding the UI with input metadata.
+    const stderr=String(err?.stderr||'');
+    const tail=stderr.split('\n').slice(-40).join('\n');
+    const wrapped=new Error(`FFmpeg render failed\n${tail}`);
+    wrapped.cause=err;
+    throw wrapped;
+  }
   return outputPath;
 }
