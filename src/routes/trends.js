@@ -1,4 +1,5 @@
 import express from 'express';
+import { getSecret } from '../lib/settingsStore.js';
 export const trendsRouter=express.Router();
 
 const categorySeeds={
@@ -30,7 +31,7 @@ async function yt(path,params,key){const u=new URL(`https://www.googleapis.com/y
 
 trendsRouter.get('/',async(req,res)=>{
   try{
-    const key=process.env.YOUTUBE_API_KEY;if(!key)return res.status(400).json({error:'YOUTUBE_API_KEY가 설정되어 있지 않습니다.'});
+    const key=getSecret('YOUTUBE_API_KEY');if(!key)return res.status(400).json({error:'YOUTUBE_API_KEY가 설정되어 있지 않습니다. 설정 화면에서 입력해 주세요.'});
     const region=String(req.query.region||'US').toUpperCase();
     const category=String(req.query.category||'general');
     const days=Math.max(1,Math.min(30,Number(req.query.days||7)));
