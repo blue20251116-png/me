@@ -26,12 +26,24 @@ export async function runPipeline(projectId){
       db.prepare('INSERT INTO shorts_scenes(id,project_id,script_id,scene_order,narration,estimated_duration,visual_query,visual_type,transition,emphasis_json) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,projectId,sid,s.scene_order,s.narration,s.duration,s.visual_query,'footage',s.transition||'cut',JSON.stringify(s.emphasis||[]));
       sceneRows.push({...s,id});
     }
+
+    // Select stock footage sequentially so each search can use continuity from the
+    // previously selected scene instead of treating every scene as an isolated query.
+    let previousSelection=null;
+    const storyAnchor=planned?.story_context?.continuity_anchor||planned?.story_context?.setting||p.topic||'';
     for(const s of sceneRows){
-      const {candidates}=await searchPexels(s.visual_query,s.duration);
+      const continuity={
+        anchor:storyAnchor,
+        previousQuery:previousSelection?.query||'',
+        previousCreator:previousSelection?.creatorName||'',
+        keywords:Array.isArray(s.continuity_keywords)?s.continuity_keywords:[]
+      };
+      const {candidates}=await searchPexels(s.visual_query,s.duration,{continuity,maxResults:10});
       for(let i=0;i<candidates.length;i++){
         const c=candidates[i],mid=newId('media');
-        db.prepare('INSERT INTO shorts_media(id,project_id,scene_id,source_type,duration,provider,external_id,search_query,license_type,preview_url,download_url,width,height,score,is_selected) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(mid,projectId,s.id,'STOCK',c.duration,c.provider,c.externalId,s.visual_query,c.licenseType,c.previewUrl,c.downloadUrl,c.width,c.height,c.score,i===0?1:0);
+        db.prepare('INSERT INTO shorts_media(id,project_id,scene_id,source_type,duration,provider,external_id,search_query,license_type,preview_url,download_url,width,height,score,is_selected,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(mid,projectId,s.id,'STOCK',c.duration,c.provider,c.externalId,s.visual_query,c.licenseType,c.previewUrl,c.downloadUrl,c.width,c.height,c.score,i===0?1:0,JSON.stringify({creatorName:c.creatorName||'',sourceUrl:c.sourceUrl||'',sceneRole:s.scene_role||'',continuityKeywords:s.continuity_keywords||[],storyContext:planned.story_context||{}}));
       }
+      if(candidates[0]) previousSelection={...candidates[0],query:s.visual_query};
     }
     db.prepare("UPDATE shorts_projects SET status='MEDIA_READY' WHERE id=?").run(projectId);
 
@@ -59,7 +71,7 @@ export async function runPipeline(projectId){
     const ass=storagePath('renders',`${projectId}.ass`);
     await renderVideo({sceneFiles:files,sceneDurations:durations,captions,audioPath:audio,outputPath:out,assPath:ass});
     const rid=newId('render');
-    db.prepare("INSERT INTO shorts_renders(id,project_id,file_path,duration,status,timeline_json) VALUES(?,?,?,?,?,?)").run(rid,projectId,out,tts.duration,'READY',JSON.stringify(timeline));
+    db.prepare("INSERT INTO shorts_renders(id,project_id,file_path,duration,status,timeline_json) VALUES(?,?,?,?,?,?)").run(rid,projectId,out,tts.duration,'READY',JSON.stringify({...timeline,story_context:planned.story_context||{}}));
 
     const yt=await generateYoutubeMetadata({topic:p.topic,hook:script.hook,script:script.script,ending:script.ending});
     const pubId=newId('pub');
