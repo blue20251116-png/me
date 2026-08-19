@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Global Shorts AI</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="app-top">
+    <div class="brand">
+      <span class="brand-mark">▶</span>
+      <div class="brand-text">
+        <h1>Global Shorts AI</h1>
+        <span id="connStatus" class="conn-badge conn-loading">서버 확인 중…</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-content">
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="stat-grid">
+        <div class="stat-card amber"><span class="stat-label">전체 프로젝트</span><span id="statTotal" class="stat-value">0</span><span class="stat-sub">생성된 쇼츠 작업</span></div>
+        <div class="stat-card green"><span class="stat-label">완료</span><span id="statReady" class="stat-value">0</span><span class="stat-sub">READY 상태</span></div>
+        <div class="stat-card blue"><span class="stat-label">진행 중</span><span id="statRunning" class="stat-value">0</span><span class="stat-sub">AI 생성/렌더링</span></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>최근 프로젝트</h2><button id="refreshBtn" class="btn-secondary small">새로고침</button></div>
+        <div id="projectList" class="project-list"><p class="empty">아직 프로젝트가 없습니다</p></div>
+      </div>
+    </section>
+
+    <section id="tab-create" class="tab-panel">
+      <div class="panel narrow autopilot-panel">
+        <h2>🚀 새 해외 Shorts 만들기</h2>
+        <p class="hint">주제 하나만 입력하면 영어 대본 → Scene → 스톡 영상 → TTS → 자막 → 9:16 MP4 순서로 생성합니다.</p>
+        <form id="createForm">
+          <label>주제
+            <textarea id="topicInput" rows="4" placeholder="예: 5 Most Beautiful Places That Don't Look Real" required></textarea>
+          </label>
+          <label>Voice mode
+            <select id="voiceMode">
+              <option value="AI_TTS">AI 영어 TTS</option>
+              <option value="NONE">TTS 없음</option>
+              <option value="UPLOAD">직접 음성 업로드</option>
+            </select>
+          </label>
+          <button type="submit" class="btn-primary big">✨ AI Shorts 생성 시작</button>
+          <p id="createMsg" class="msg"></p>
+        </form>
+      </div>
+
+      <div id="currentProject" class="panel narrow hidden">
+        <div class="panel-head"><h2>현재 작업</h2><span id="currentStatus" class="status-pill">DRAFT</span></div>
+        <p id="currentTopic" class="project-topic"></p>
+        <div class="progress-wrap"><div id="progressBar" class="progress-bar"></div></div>
+        <p id="progressText" class="hint">대기 중</p>
+        <button id="runBtn" class="btn-primary" type="button">파이프라인 실행</button>
+      </div>
+    </section>
+
+    <section id="tab-preview" class="tab-panel">
+      <div class="panel">
+        <h2>🎬 Preview</h2>
+        <div id="previewBox" class="preview-box">
+          <div class="phone-frame"><div class="phone-placeholder">완성된 영상이 생성되면<br>여기에 표시됩니다</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>대본 / Scene</h2>
+        <div id="detailBox" class="detail-box"><p class="empty">프로젝트를 선택해 주세요</p></div>
+      </div>
+    </section>
+
+    <section id="tab-settings" class="tab-panel">
+      <div class="panel narrow">
+        <h2>⚙️ V1 연결 상태</h2>
+        <div class="setting-row"><span>Claude API</span><span>환경변수</span></div>
+        <div class="setting-row"><span>Pexels API</span><span>환경변수</span></div>
+        <div class="setting-row"><span>OpenAI API</span><span>환경변수</span></div>
+        <div class="setting-row"><span>FFmpeg</span><span>서버 설치 필요</span></div>
+        <p class="hint setting-hint">API Key 값은 화면에 표시하지 않습니다. Railway Variables에서 관리하세요.</p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="dashboard"><span class="nav-icon">⌂</span><span class="nav-label">대시보드</span></button>
+    <button class="nav-btn" data-tab="create"><span class="nav-icon">＋</span><span class="nav-label">새 쇼츠</span></button>
+    <button class="nav-btn" data-tab="preview"><span class="nav-icon">▶</span><span class="nav-label">미리보기</span></button>
+    <button class="nav-btn" data-tab="settings"><span class="nav-icon">⚙</span><span class="nav-label">설정</span></button>
+  </nav>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
