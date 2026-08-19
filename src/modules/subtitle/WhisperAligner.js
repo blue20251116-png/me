@@ -1,6 +1,7 @@
 import fs from 'node:fs';
+import { getSecret } from '../../lib/settingsStore.js';
 export async function alignWithWhisper({audioPath, scriptText}) {
-  const apiKey=process.env.OPENAI_API_KEY; if(!apiKey) throw new Error('OPENAI_API_KEY가 설정되어 있지 않습니다.');
+  const apiKey=getSecret('OPENAI_API_KEY'); if(!apiKey) throw new Error('OPENAI_API_KEY가 설정되어 있지 않습니다. 설정 화면에서 입력해 주세요.');
   const form=new FormData();
   form.append('file',new Blob([fs.readFileSync(audioPath)]), 'speech.mp3');
   form.append('model','whisper-1');
