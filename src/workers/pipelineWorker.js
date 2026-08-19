@@ -61,10 +61,10 @@ export async function runPipeline(projectId){
     const rid=newId('render');
     db.prepare("INSERT INTO shorts_renders(id,project_id,file_path,duration,status,timeline_json) VALUES(?,?,?,?,?,?)").run(rid,projectId,out,tts.duration,'READY',JSON.stringify(timeline));
 
-    // Render 성공 후 업로드용 제목/설명/해시태그 자동 생성.
     const yt=await generateYoutubeMetadata({topic:p.topic,hook:script.hook,script:script.script,ending:script.ending});
     const pubId=newId('pub');
-    db.prepare('INSERT INTO shorts_publications(id,project_id,title,description,hashtags,status) VALUES(?,?,?,?,?,?)').run(pubId,projectId,yt.title,yt.description,yt.hashtags.join(' '),'METADATA_READY');
+    const packedDescription=[yt.description,`HOOK_TEXT::${yt.hook_text}`,`THUMBNAIL_TEXT::${yt.thumbnail_text}`].filter(Boolean).join('\n');
+    db.prepare('INSERT INTO shorts_publications(id,project_id,title,description,hashtags,status) VALUES(?,?,?,?,?,?)').run(pubId,projectId,yt.title,packedDescription,yt.hashtags.join(' '),'METADATA_READY');
 
     db.prepare("UPDATE shorts_projects SET status='READY' WHERE id=?").run(projectId);
     return {ok:true,renderId:rid,filePath:out,metadata:yt};
