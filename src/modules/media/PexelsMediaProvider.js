@@ -1,3 +1,4 @@
+import { getSecret } from '../../lib/settingsStore.js';
 const PEXELS_SEARCH_URL = 'https://api.pexels.com/videos/search';
 const MIN_DURATION = 2;
 const MAX_DURATION = 60;
@@ -19,8 +20,8 @@ function chooseFile(files=[]) {
   return pool.find(f=>(f.height||0)>=720) || pool[0] || null;
 }
 export async function searchPexels(query, sceneDuration=3, options={}) {
-  const apiKey = process.env.PEXELS_API_KEY;
-  if (!apiKey) throw new Error('PEXELS_API_KEY가 설정되어 있지 않습니다.');
+  const apiKey = getSecret('PEXELS_API_KEY');
+  if (!apiKey) throw new Error('PEXELS_API_KEY가 설정되어 있지 않습니다. 설정 화면에서 입력해 주세요.');
   const url = `${PEXELS_SEARCH_URL}?query=${encodeURIComponent(query)}&orientation=portrait&per_page=${options.maxResults||8}`;
   const res = await fetch(url,{headers:{Authorization:apiKey}});
   if(!res.ok) throw new Error(`Pexels API 오류 (${res.status})`);
