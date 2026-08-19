@@ -21,14 +21,15 @@ projectsRouter.get('/:id',(req,res)=>{
   const cap=db.prepare('SELECT * FROM shorts_captions WHERE project_id=? ORDER BY created_at DESC LIMIT 1').get(p.id);
   const renders=db.prepare('SELECT * FROM shorts_renders WHERE project_id=? ORDER BY created_at DESC').all(p.id);
   const publication=db.prepare('SELECT * FROM shorts_publications WHERE project_id=? ORDER BY rowid DESC LIMIT 1').get(p.id);
-  res.json({
-    project:p,
-    script,
-    scenes,
-    captions:cap?{...cap,captions:safeJsonParse(cap.captions_json,[])}:null,
-    renders,
-    publication:publication?{...publication,hashtags:String(publication.hashtags||'').split(/\s+/).filter(Boolean)}:null
-  });
+  let pub=null;
+  if(publication){
+    const lines=String(publication.description||'').split('\n');
+    const hookLine=lines.find(x=>x.startsWith('HOOK_TEXT::'))||'';
+    const thumbLine=lines.find(x=>x.startsWith('THUMBNAIL_TEXT::'))||'';
+    const description=lines.filter(x=>!x.startsWith('HOOK_TEXT::')&&!x.startsWith('THUMBNAIL_TEXT::')).join('\n').trim();
+    pub={...publication,description,hook_text:hookLine.slice('HOOK_TEXT::'.length),thumbnail_text:thumbLine.slice('THUMBNAIL_TEXT::'.length),hashtags:String(publication.hashtags||'').split(/\s+/).filter(Boolean)};
+  }
+  res.json({project:p,script,scenes,captions:cap?{...cap,captions:safeJsonParse(cap.captions_json,[])}:null,renders,publication:pub});
 });
 
 projectsRouter.post('/:id/run',(req,res)=>{
