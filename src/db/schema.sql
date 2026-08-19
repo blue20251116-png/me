@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS shorts_projects (id TEXT PRIMARY KEY,user_id TEXT,topic TEXT,source_url TEXT,source_type TEXT,category TEXT,target_country TEXT DEFAULT 'US',language TEXT DEFAULT 'en',voice_mode TEXT DEFAULT 'AI_TTS',status TEXT DEFAULT 'DRAFT',content_hash TEXT,normalized_topic TEXT,error_message TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS shorts_scripts (id TEXT PRIMARY KEY,project_id TEXT,hook TEXT,script TEXT,ending TEXT,duration REAL,hook_type TEXT,ending_type TEXT,metadata_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS shorts_scenes (id TEXT PRIMARY KEY,project_id TEXT,script_id TEXT,scene_order INTEGER,narration TEXT,estimated_duration REAL,final_duration REAL,visual_query TEXT,visual_type TEXT,transition TEXT,emphasis_json TEXT,media_id TEXT);
+CREATE TABLE IF NOT EXISTS shorts_media (id TEXT PRIMARY KEY,project_id TEXT,scene_id TEXT,source_type TEXT,file_path TEXT,duration REAL,provider TEXT,external_id TEXT,search_query TEXT,license_type TEXT,preview_url TEXT,download_url TEXT,width INTEGER,height INTEGER,score REAL,is_selected INTEGER DEFAULT 0,metadata_json TEXT);
+CREATE TABLE IF NOT EXISTS shorts_captions (id TEXT PRIMARY KEY,project_id TEXT,source TEXT,captions_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS shorts_renders (id TEXT PRIMARY KEY,project_id TEXT,file_path TEXT,duration REAL,status TEXT,timeline_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS shorts_publications (id TEXT PRIMARY KEY,project_id TEXT,youtube_video_id TEXT,title TEXT,description TEXT,hashtags TEXT,published_at DATETIME,status TEXT);
+CREATE TABLE IF NOT EXISTS shorts_metrics (id TEXT PRIMARY KEY,publication_id TEXT,hours_since_publish INTEGER,views INTEGER,likes INTEGER,comments INTEGER,avg_view_duration REAL,avg_percentage_viewed REAL,captured_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_projects_hash ON shorts_projects(content_hash);
+CREATE INDEX IF NOT EXISTS idx_metrics_pub ON shorts_metrics(publication_id);

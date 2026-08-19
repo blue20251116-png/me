@@ -1,0 +1,24 @@
+{
+  "name": "yt-shorts-global",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "해외전용 YouTube Shorts AI 제작 파이프라인 V1 — 기존 Threads/쇼핑쇼츠 프로젝트와 완전 분리된 독립 프로젝트",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "worker": "node src/workers/pipelineWorker.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "uuid": "^14.0.2"
+  }
+}
