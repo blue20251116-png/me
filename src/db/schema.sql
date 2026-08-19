@@ -6,5 +6,6 @@ CREATE TABLE IF NOT EXISTS shorts_captions (id TEXT PRIMARY KEY,project_id TEXT,
 CREATE TABLE IF NOT EXISTS shorts_renders (id TEXT PRIMARY KEY,project_id TEXT,file_path TEXT,duration REAL,status TEXT,timeline_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS shorts_publications (id TEXT PRIMARY KEY,project_id TEXT,youtube_video_id TEXT,title TEXT,description TEXT,hashtags TEXT,published_at DATETIME,status TEXT);
 CREATE TABLE IF NOT EXISTS shorts_metrics (id TEXT PRIMARY KEY,publication_id TEXT,hours_since_publish INTEGER,views INTEGER,likes INTEGER,comments INTEGER,avg_view_duration REAL,avg_percentage_viewed REAL,captured_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_projects_hash ON shorts_projects(content_hash);
 CREATE INDEX IF NOT EXISTS idx_metrics_pub ON shorts_metrics(publication_id);
