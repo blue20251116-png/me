@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { initSchema } from './db/db.js';
 import { projectsRouter } from './routes/projects.js';
 import { trendsRouter } from './routes/trends.js';
@@ -18,6 +19,15 @@ app.use('/api/trends', trendsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/storage', express.static(path.join(__dirname, '..', 'storage')));
 app.use('/', express.static(path.join(__dirname, '..', 'admin')));
-app.get('/api/health', (_req, res) => res.json({ ok: true, services:configuredServices() }));
+function commandAvailable(command){
+  try{
+    const r=spawnSync(command,['-version'],{stdio:'ignore'});
+    return !r.error && r.status===0;
+  }catch{return false;}
+}
+app.get('/api/health', (_req, res) => {
+  const services=configuredServices();
+  res.json({ok:true,services:{...services,ffmpeg:commandAvailable('ffmpeg'),ffprobe:commandAvailable('ffprobe')}});
+});
 const port = process.env.PORT || 4100;
 app.listen(port, () => console.log(`yt-shorts-global API listening on :${port}`));
