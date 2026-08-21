@@ -10,8 +10,8 @@ import { trendsRouter } from './routes/trends.js';
 import { settingsRouter } from './routes/settings.js';
 import { discoveryRouter } from './routes/discovery.js';
 import { discoveryAutoRouter } from './routes/discoveryAuto.js';
+import { browserBridgeRouter } from './routes/browserBridge.js';
 import { configuredServices, hydrateSavedSettings } from './lib/settingsStore.js';
-import { startSocialMonitor } from './workers/socialMonitor.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 initSchema();
 hydrateSavedSettings();
@@ -23,13 +23,10 @@ app.use('/api/trends', trendsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/discovery', discoveryRouter);
 app.use('/api/discovery-auto', discoveryAutoRouter);
+app.use('/api/browser-bridge', browserBridgeRouter);
 
-// Serve exactly the same root used by storagePath(). This prevents generated files
-// from being written to one directory while Express serves another after Railway config changes.
 const storageRoot=path.resolve(process.env.STORAGE_ROOT||path.join(__dirname,'..','storage'));
 app.use('/storage',express.static(storageRoot,{fallthrough:true}));
-// Mobile video clients can occasionally send a stale byte range after a generated file
-// has been replaced. Keep that expected 416 from dumping a send stack trace into Railway logs.
 app.use('/storage',(err,req,res,next)=>{
   if(err?.status===416||err?.statusCode===416){res.status(416).set('Content-Range','bytes */0').end();return;}
   next(err);
@@ -40,10 +37,10 @@ function commandAvailable(command){
 }
 app.get('/api/health', (_req, res) => {
   const services=configuredServices();
-  res.json({ok:true,services:{...services,ffmpeg:commandAvailable('ffmpeg'),ffprobe:commandAvailable('ffprobe')}});
+  res.json({ok:true,services:{...services,instagramCollection:'CHROME_BRIDGE',ffmpeg:commandAvailable('ffmpeg'),ffprobe:commandAvailable('ffprobe')}});
 });
 const port = process.env.PORT || 4100;
 app.listen(port, () => {
   console.log(`yt-shorts-global API listening on :${port}`);
-  startSocialMonitor();
+  console.log('[Instagram] collection mode=CHROME_BRIDGE server-side polling=disabled');
 });
