@@ -14,11 +14,18 @@ async function waitTab(tabId,timeout=15000){
 async function collectLinks(tabId){
   const [{result=[]}]=await chrome.scripting.executeScript({target:{tabId},func:async()=>{
     const wait=ms=>new Promise(r=>setTimeout(r,ms));
-    const grab=()=>[...document.querySelectorAll('a[href*="/reel/"]')].map(a=>({href:a.href,text:(a.innerText||a.parentElement?.innerText||'').trim().slice(0,1000)}));
+    const grab=()=>[...document.querySelectorAll('a[href*="/reel/"]')].map(a=>({href:a.href,text:(a.innerText||a.parentElement?.innerText||'').trim().slice(0,1200)}));
     let all=grab();
     for(let i=0;i<3;i++){window.scrollBy(0,Math.max(window.innerHeight*1.5,900));await wait(900);all=all.concat(grab());}
     const m=new Map();for(const x of all){if(x.href&&/instagram\.com\/reel\//.test(x.href))m.set(x.href,x);}return [...m.values()].slice(0,30);
   }});return result;
+}
+function productLinkScore(x){
+  const s=String(x?.text||'').toLowerCase();let score=0;
+  if(/제품|상품|구매|링크|프로필|인포크|쿠팡|공구|추천|제품정보|구매정보/.test(s))score+=100;
+  if(/살림|수납|주방|생활|차량|육아|반려|꿀템|아이템|템|정리|청소|가전|홈/.test(s))score+=40;
+  if(/댓글|검색|궁금|정보/.test(s))score+=25;
+  return score+Math.random()*3;
 }
 async function collectDetail(tabId,username,sourceUrl,seedText=''){
   const [{result}]=await chrome.scripting.executeScript({target:{tabId},args:[username,sourceUrl,seedText],func:async(username,sourceUrl,seedText)=>{
@@ -29,7 +36,8 @@ async function collectDetail(tabId,username,sourceUrl,seedText=''){
     const article=document.querySelector('article');
     const pageText=(article?.innerText||document.body?.innerText||'').trim();
     const caption=(meta('og:description')||pageText||seedText||'').slice(0,5000);
-    const videoUrl=v?.currentSrc||v?.src||meta('og:video:secure_url')||meta('og:video')||'';
+    const rawVideo=v?.currentSrc||v?.src||meta('og:video:secure_url')||meta('og:video')||'';
+    const videoUrl=/^https?:\/\//i.test(rawVideo)?rawVideo:(/^https?:\/\//i.test(meta('og:video:secure_url'))?meta('og:video:secure_url'):meta('og:video'));
     const thumbnailUrl=v?.poster||meta('og:image')||'';
     const m=sourceUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
     return {username,sourceUrl,externalPostId:m?.[1]||'',videoUrl,thumbnailUrl,caption,pageText:pageText.slice(0,5000)};
@@ -45,7 +53,7 @@ async function runBridge(baseUrl,pin){
     try{
       tab=await openHidden(`https://www.instagram.com/${encodeURIComponent(target.username)}/reels/`);
       const links=await collectLinks(tab.id);
-      if(links.length){const choice=links[Math.floor(Math.random()*links.length)];picked.push({username:target.username,...choice});}
+      if(links.length){const choice=[...links].sort((a,b)=>productLinkScore(b)-productLinkScore(a))[0];picked.push({username:target.username,...choice});}
     }catch(e){console.warn('[ME Bridge] profile failed',target.username,e);}finally{if(tab?.id)await chrome.tabs.remove(tab.id).catch(()=>{});}
     await sleep(900);
   }
