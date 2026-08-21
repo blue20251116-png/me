@@ -18,20 +18,40 @@ async function runActor(actorId,input,timeoutMs=120000){
 }
 function num(v){const n=Number(String(v??'').replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n:0;}
 function first(...v){return v.find(x=>x!==undefined&&x!==null&&String(x).trim()!=='');}
-function walkUrls(obj,pred,out=[],depth=0){
-  if(depth>7||obj==null)return out;
-  if(typeof obj==='string'){if(/^https?:\/\//i.test(obj)&&pred(obj,''))out.push(obj);return out;}
-  if(Array.isArray(obj)){for(const x of obj)walkUrls(x,pred,out,depth+1);return out;}
-  if(typeof obj==='object')for(const [k,v] of Object.entries(obj)){
-    if(typeof v==='string'&&/^https?:\/\//i.test(v)&&pred(v,k))out.push(v);else walkUrls(v,pred,out,depth+1);
+function collectUrls(obj,out=[],path='',depth=0){
+  if(depth>8||obj==null)return out;
+  if(typeof obj==='string'){
+    if(/^https?:\/\//i.test(obj))out.push({url:obj,path});
+    return out;
   }
+  if(Array.isArray(obj)){for(let i=0;i<obj.length;i++)collectUrls(obj[i],out,`${path}[${i}]`,depth+1);return out;}
+  if(typeof obj==='object')for(const [k,v] of Object.entries(obj))collectUrls(v,out,path?`${path}.${k}`:k,depth+1);
   return out;
 }
-function videoUrlFrom(x){
-  const urls=walkUrls(x,(u,k)=>/video|play|download|media|mp4|stream/i.test(k)||/\.mp4(?:\?|$)/i.test(u));
-  return urls.find(u=>/\.mp4(?:\?|$)/i.test(u))||urls[0]||'';
+function isAudioCandidate(url,path=''){
+  const s=`${path} ${url}`.toLowerCase();
+  return /(^|[._/-])(audio|music|sound|bgm|voice|song)([._/-]|$)/i.test(s)||/\.(?:mp3|m4a|aac|wav|ogg|flac)(?:\?|$)/i.test(url);
 }
-function imageUrlFrom(x){return walkUrls(x,(u,k)=>/cover|thumb|image|poster/i.test(k)||/\.(?:jpe?g|png|webp)(?:\?|$)/i.test(u))[0]||'';}
+function isImageCandidate(url,path=''){
+  const s=`${path} ${url}`.toLowerCase();
+  return /(cover|thumb|image|poster|avatar)/i.test(s)||/\.(?:jpe?g|png|webp|gif)(?:\?|$)/i.test(url);
+}
+function videoScore({url,path}){
+  if(isAudioCandidate(url,path)||isImageCandidate(url,path))return -1000;
+  const s=String(path||'').toLowerCase();
+  let score=0;
+  if(/\.(?:mp4|mov|m4v|webm)(?:\?|$)/i.test(url))score+=120;
+  if(/downloadedvideo|downloadvideo|video_url|videourl|play_url|playurl|download_url|downloadurl/.test(s))score+=100;
+  if(/video/.test(s))score+=70;
+  if(/play|download|stream|media/.test(s))score+=35;
+  if(/watermark|cover|thumb|image|music|audio|sound/.test(s))score-=80;
+  return score;
+}
+function videoUrlFrom(x){
+  const candidates=collectUrls(x).filter(c=>!isAudioCandidate(c.url,c.path)&&!isImageCandidate(c.url,c.path)).map(c=>({...c,score:videoScore(c)})).filter(c=>c.score>0).sort((a,b)=>b.score-a.score);
+  return candidates[0]?.url||'';
+}
+function imageUrlFrom(x){return collectUrls(x).find(c=>isImageCandidate(c.url,c.path))?.url||'';}
 function douyinNormalize(raw){
   const x=raw?.item||raw||{};const stat=x.statistics||x.stats||{};const author=x.author||x.creator||{};
   const id=String(first(x.awemeId,x.aweme_id,x.videoId,x.id,x.itemId,'')).trim();
@@ -55,7 +75,8 @@ function xhsSearchNormalize(raw){
 }
 function xhsDownloadedUrl(raw){
   const result=raw?.result||raw||{};const medias=Array.isArray(result.medias)?result.medias:[];
-  return medias.find(m=>String(m?.type||'').toLowerCase()==='video'&&/^https?:\/\//i.test(m?.url||''))?.url||videoUrlFrom(result);
+  const explicit=medias.find(m=>String(m?.type||'').toLowerCase()==='video'&&/^https?:\/\//i.test(m?.url||'')&&!isAudioCandidate(m.url,'medias.video'))?.url;
+  return explicit||videoUrlFrom(result);
 }
 function popularity(x){return Number(x.likes||0)*4+Number(x.comments||0)*3+Number(x.shares||0)*5+Number(x.views||0)*0.02;}
 
@@ -71,8 +92,6 @@ export class ApifyXiaohongshuCollector extends BaseSocialCollector{
   constructor(){super('XIAOHONGSHU');}
   async discover(target){
     const keyword=String(target.target_value||'').trim();if(!keyword)return [];
-    // EasyApi actor schema requires maxItems >= 30. Fetch the minimum allowed,
-    // then keep only the top 10 candidates locally to control downstream cost.
     const search=await runActor(XHS_SEARCH_ACTOR,{mode:'search',keywords:[keyword],maxItems:30});
     const normalized=search.map(xhsSearchNormalize).filter(x=>x?.sourceUrl).sort((a,b)=>popularity(b)-popularity(a)).slice(0,10);
     const need=normalized.filter(x=>!x.videoUrl).slice(0,10);
