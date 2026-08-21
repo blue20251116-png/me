@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS shorts_metrics (id TEXT PRIMARY KEY,publication_id TE
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 
 CREATE TABLE IF NOT EXISTS social_monitor_targets (id TEXT PRIMARY KEY,platform TEXT NOT NULL,target_type TEXT NOT NULL,target_value TEXT NOT NULL,enabled INTEGER DEFAULT 1,last_checked_at DATETIME,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(platform,target_type,target_value));
+CREATE TABLE IF NOT EXISTS instagram_benchmark_accounts (id TEXT PRIMARY KEY,target_id TEXT UNIQUE,username TEXT NOT NULL UNIQUE,inpock_url TEXT,profile_url TEXT,enabled INTEGER DEFAULT 1,last_inpock_checked_at DATETIME,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS social_posts (id TEXT PRIMARY KEY,target_id TEXT,platform TEXT NOT NULL,external_post_id TEXT NOT NULL,author_id TEXT,author_name TEXT,source_url TEXT NOT NULL,caption TEXT,published_at DATETIME,views INTEGER DEFAULT 0,likes INTEGER DEFAULT 0,comments INTEGER DEFAULT 0,shares INTEGER DEFAULT 0,video_url TEXT,local_video_path TEXT,thumbnail_url TEXT,status TEXT DEFAULT 'DISCOVERED',error_message TEXT,metadata_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(platform,external_post_id));
 CREATE TABLE IF NOT EXISTS social_job_logs (id TEXT PRIMARY KEY,post_id TEXT,platform TEXT,stage TEXT,reason TEXT,attempt INTEGER DEFAULT 1,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS social_video_cleanups (id TEXT PRIMARY KEY,post_id TEXT NOT NULL,original_path TEXT NOT NULL,clean_path TEXT NOT NULL,mode TEXT NOT NULL,region_json TEXT,ocr_text TEXT,status TEXT DEFAULT 'READY',error_message TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
@@ -21,6 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_projects_hash ON shorts_projects(content_hash);
 CREATE INDEX IF NOT EXISTS idx_metrics_pub ON shorts_metrics(publication_id);
 CREATE INDEX IF NOT EXISTS idx_social_posts_status ON social_posts(status);
 CREATE INDEX IF NOT EXISTS idx_social_posts_target ON social_posts(target_id);
+CREATE INDEX IF NOT EXISTS idx_instagram_accounts_target ON instagram_benchmark_accounts(target_id);
 CREATE INDEX IF NOT EXISTS idx_cleanup_post ON social_video_cleanups(post_id);
 CREATE INDEX IF NOT EXISTS idx_frames_post ON video_frames(post_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_post ON product_candidates(post_id);
