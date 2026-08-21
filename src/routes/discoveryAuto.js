@@ -14,22 +14,22 @@ const DEFAULT_TARGETS={
 const runState={running:false,stage:'IDLE',message:'대기 중',startedAt:null,finishedAt:null,newPosts:0,totalPosts:0,queued:0,processed:0,succeeded:0,failed:0,currentPostId:null,lastError:null};
 
 function collectorStatus(){
+  const apify=Boolean(getSecret('APIFY_API_TOKEN'));
   return {
-    DOUYIN:Boolean(getSecret('DOUYIN_COLLECTOR_ENDPOINT')),
-    XIAOHONGSHU:Boolean(getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'))
+    APIFY:apify,
+    DOUYIN:apify||Boolean(getSecret('DOUYIN_COLLECTOR_ENDPOINT')),
+    XIAOHONGSHU:apify||Boolean(getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'))
   };
 }
 
 function ensureDefaultTargets(){
-  const status=collectorStatus();
-  let added=0;
+  const status=collectorStatus();let added=0;
   for(const [platform,values] of Object.entries(DEFAULT_TARGETS)){
     if(!status[platform])continue;
     for(const value of values){
       const exists=db.prepare('SELECT id FROM social_monitor_targets WHERE platform=? AND target_type=? AND target_value=?').get(platform,'KEYWORD',value);
       if(exists){db.prepare('UPDATE social_monitor_targets SET enabled=1,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(exists.id);continue;}
-      db.prepare('INSERT INTO social_monitor_targets(id,platform,target_type,target_value,enabled) VALUES(?,?,?,?,1)').run(newId('target'),platform,'KEYWORD',value);
-      added++;
+      db.prepare('INSERT INTO social_monitor_targets(id,platform,target_type,target_value,enabled) VALUES(?,?,?,?,1)').run(newId('target'),platform,'KEYWORD',value);added++;
     }
   }
   return added;
@@ -42,7 +42,7 @@ async function analyzePost(postId){
 }
 
 async function executeOneClick(){
-  runState.running=true;runState.stage='COLLECTING';runState.message='중국 인기 상품영상을 찾고 있습니다';runState.startedAt=new Date().toISOString();runState.finishedAt=null;runState.newPosts=0;runState.queued=0;runState.processed=0;runState.succeeded=0;runState.failed=0;runState.currentPostId=null;runState.lastError=null;
+  runState.running=true;runState.stage='COLLECTING';runState.message='Apify에서 Douyin·Xiaohongshu 인기 상품영상을 찾고 있습니다';runState.startedAt=new Date().toISOString();runState.finishedAt=null;runState.newPosts=0;runState.queued=0;runState.processed=0;runState.succeeded=0;runState.failed=0;runState.currentPostId=null;runState.lastError=null;
   try{
     ensureDefaultTargets();
     const before=Number(db.prepare('SELECT COUNT(*) FROM social_posts').pluck().get()||0);
@@ -59,15 +59,15 @@ async function executeOneClick(){
 
 discoveryAutoRouter.get('/status',(_req,res)=>{
   const collectors=collectorStatus();
-  res.json({collectors,ready:Object.values(collectors).some(Boolean),services:{serpapi:!!getSecret('SERPAPI_API_KEY'),coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')},activeTargets:Number(db.prepare('SELECT COUNT(*) FROM social_monitor_targets WHERE enabled=1').pluck().get()||0),posts:Number(db.prepare('SELECT COUNT(*) FROM social_posts').pluck().get()||0),run:{...runState}});
+  res.json({collectors,ready:collectors.DOUYIN||collectors.XIAOHONGSHU,services:{apify:collectors.APIFY,serpapi:!!getSecret('SERPAPI_API_KEY'),coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')},activeTargets:Number(db.prepare('SELECT COUNT(*) FROM social_monitor_targets WHERE enabled=1').pluck().get()||0),posts:Number(db.prepare('SELECT COUNT(*) FROM social_posts').pluck().get()||0),run:{...runState}});
 });
 
 discoveryAutoRouter.post('/run',(req,res)=>{
   const collectors=collectorStatus();
-  if(!Object.values(collectors).some(Boolean))return res.status(503).json({error:'중국 SNS 수집기 설정이 필요합니다. 아래 필수 연결 설정에서 Collector Endpoint를 저장해 주세요.',collectors});
+  if(!collectors.APIFY&&!collectors.DOUYIN&&!collectors.XIAOHONGSHU)return res.status(503).json({error:'Apify API Token을 먼저 저장해 주세요.'});
   if(!getSecret('SERPAPI_API_KEY'))return res.status(503).json({error:'SerpApi Key를 먼저 저장해 주세요.'});
   if(!getSecret('COUPANG_ACCESS_KEY')||!getSecret('COUPANG_SECRET_KEY'))return res.status(503).json({error:'쿠팡파트너스 Access Key와 Secret Key를 먼저 저장해 주세요.'});
   if(!getSecret('PUBLIC_BASE_URL'))return res.status(503).json({error:'Public Base URL을 먼저 저장해 주세요. 예: https://me-production-fd20.up.railway.app'});
   if(runState.running)return res.status(409).json({error:'이미 자동 작업이 진행 중입니다.',run:{...runState}});
-  setImmediate(()=>executeOneClick());res.status(202).json({ok:true,status:'STARTED',message:'중국 인기영상 수집부터 쿠팡 매칭까지 자동 작업을 시작했습니다.'});
+  setImmediate(()=>executeOneClick());res.status(202).json({ok:true,status:'STARTED',message:'Apify 수집부터 쿠팡 매칭까지 자동 작업을 시작했습니다.'});
 });
