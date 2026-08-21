@@ -1,4 +1,5 @@
 import { BaseSocialCollector } from './BaseSocialCollector.js';
+import { getSecret } from '../../lib/settingsStore.js';
 import { withRetry } from '../../lib/retry.js';
 
 export class RemoteSocialCollector extends BaseSocialCollector {
@@ -14,7 +15,7 @@ export class RemoteSocialCollector extends BaseSocialCollector {
 }
 export function collectorFor(platform){
   const p=String(platform||'').toUpperCase();
-  if(p==='DOUYIN')return new RemoteSocialCollector('DOUYIN',process.env.DOUYIN_COLLECTOR_ENDPOINT,process.env.DOUYIN_COLLECTOR_TOKEN||'');
-  if(p==='XIAOHONGSHU')return new RemoteSocialCollector('XIAOHONGSHU',process.env.XIAOHONGSHU_COLLECTOR_ENDPOINT,process.env.XIAOHONGSHU_COLLECTOR_TOKEN||'');
+  if(p==='DOUYIN')return new RemoteSocialCollector('DOUYIN',getSecret('DOUYIN_COLLECTOR_ENDPOINT'),getSecret('DOUYIN_COLLECTOR_TOKEN'));
+  if(p==='XIAOHONGSHU')return new RemoteSocialCollector('XIAOHONGSHU',getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'),getSecret('XIAOHONGSHU_COLLECTOR_TOKEN'));
   throw new Error(`지원하지 않는 플랫폼: ${p}`);
 }
