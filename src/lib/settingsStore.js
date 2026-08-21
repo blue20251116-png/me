@@ -4,13 +4,17 @@ import path from 'node:path';
 import { db } from '../db/db.js';
 
 const KEY_FILE=process.env.SETTINGS_KEY_FILE||'./storage/.settings.key';
-const ALLOWED=new Set(['OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY']);
+const ALLOWED=new Set([
+  'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY',
+  'COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY','COUPANG_SUB_ID',
+  'DOUYIN_COLLECTOR_ENDPOINT','DOUYIN_COLLECTOR_TOKEN',
+  'XIAOHONGSHU_COLLECTOR_ENDPOINT','XIAOHONGSHU_COLLECTOR_TOKEN',
+  'PUBLIC_BASE_URL'
+]);
 
 function masterKey(){
   fs.mkdirSync(path.dirname(KEY_FILE),{recursive:true});
-  if(!fs.existsSync(KEY_FILE)){
-    fs.writeFileSync(KEY_FILE,crypto.randomBytes(32),{mode:0o600});
-  }
+  if(!fs.existsSync(KEY_FILE))fs.writeFileSync(KEY_FILE,crypto.randomBytes(32),{mode:0o600});
   return fs.readFileSync(KEY_FILE);
 }
 function encrypt(value){
@@ -41,18 +45,30 @@ export function verifyAdminPin(pin){
 }
 export function setSecret(name,value){
   if(!ALLOWED.has(name)) throw new Error('지원하지 않는 설정입니다.');
-  if(!value){db.prepare('DELETE FROM app_settings WHERE key=?').run(name);return;}
+  if(!value){db.prepare('DELETE FROM app_settings WHERE key=?').run(name);if(!process.env[name])delete process.env[name];return;}
   db.prepare('INSERT OR REPLACE INTO app_settings(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)').run(name,encrypt(value));
+  if(!process.env[name])process.env[name]=String(value);
 }
 export function getSecret(name){
   if(process.env[name])return process.env[name];
   const row=db.prepare('SELECT value FROM app_settings WHERE key=?').get(name);if(!row)return '';
   try{return decrypt(row.value)}catch{return '';}
 }
+export function hydrateSavedSettings(){
+  for(const name of ALLOWED){
+    if(process.env[name])continue;
+    const row=db.prepare('SELECT value FROM app_settings WHERE key=?').get(name);
+    if(!row)continue;
+    try{const value=decrypt(row.value);if(value)process.env[name]=value;}catch{}
+  }
+}
 export function configuredServices(){return {
   openai:!!getSecret('OPENAI_API_KEY'),
   pexels:!!getSecret('PEXELS_API_KEY'),
   youtube:!!getSecret('YOUTUBE_API_KEY'),
   serpapi:!!getSecret('SERPAPI_API_KEY'),
-  coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY')
+  coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),
+  douyinCollector:!!getSecret('DOUYIN_COLLECTOR_ENDPOINT'),
+  xiaohongshuCollector:!!getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'),
+  publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')
 };}
