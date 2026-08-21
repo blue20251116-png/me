@@ -4,7 +4,7 @@ import path from 'node:path';
 import { db } from '../db/db.js';
 
 const KEY_FILE=process.env.SETTINGS_KEY_FILE||'./storage/.settings.key';
-const ALLOWED=new Set(['OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY']);
+const ALLOWED=new Set(['OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY']);
 
 function masterKey(){
   fs.mkdirSync(path.dirname(KEY_FILE),{recursive:true});
@@ -49,4 +49,10 @@ export function getSecret(name){
   const row=db.prepare('SELECT value FROM app_settings WHERE key=?').get(name);if(!row)return '';
   try{return decrypt(row.value)}catch{return '';}
 }
-export function configuredServices(){return {openai:!!getSecret('OPENAI_API_KEY'),pexels:!!getSecret('PEXELS_API_KEY'),youtube:!!getSecret('YOUTUBE_API_KEY')};}
+export function configuredServices(){return {
+  openai:!!getSecret('OPENAI_API_KEY'),
+  pexels:!!getSecret('PEXELS_API_KEY'),
+  youtube:!!getSecret('YOUTUBE_API_KEY'),
+  serpapi:!!getSecret('SERPAPI_API_KEY'),
+  coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY')
+};}
