@@ -8,6 +8,7 @@ import { initSchema } from './db/db.js';
 import { projectsRouter } from './routes/projects.js';
 import { trendsRouter } from './routes/trends.js';
 import { settingsRouter } from './routes/settings.js';
+import { discoveryRouter } from './routes/discovery.js';
 import { configuredServices } from './lib/settingsStore.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 initSchema();
@@ -17,6 +18,7 @@ app.use(express.json({ limit: '5mb' }));
 app.use('/api/projects', projectsRouter);
 app.use('/api/trends', trendsRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/discovery', discoveryRouter);
 app.use('/storage', express.static(path.join(__dirname, '..', 'storage')));
 app.use('/', express.static(path.join(__dirname, '..', 'admin')));
 function commandAvailable(command){
