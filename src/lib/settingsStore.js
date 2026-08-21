@@ -5,7 +5,7 @@ import { db } from '../db/db.js';
 
 const KEY_FILE=process.env.SETTINGS_KEY_FILE||'./storage/.settings.key';
 const ALLOWED=new Set([
-  'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY',
+  'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','APIFY_API_TOKEN',
   'COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY','COUPANG_SUB_ID',
   'DOUYIN_COLLECTOR_ENDPOINT','DOUYIN_COLLECTOR_TOKEN',
   'XIAOHONGSHU_COLLECTOR_ENDPOINT','XIAOHONGSHU_COLLECTOR_TOKEN',
@@ -62,13 +62,17 @@ export function hydrateSavedSettings(){
     try{const value=decrypt(row.value);if(value)process.env[name]=value;}catch{}
   }
 }
-export function configuredServices(){return {
-  openai:!!getSecret('OPENAI_API_KEY'),
-  pexels:!!getSecret('PEXELS_API_KEY'),
-  youtube:!!getSecret('YOUTUBE_API_KEY'),
-  serpapi:!!getSecret('SERPAPI_API_KEY'),
-  coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),
-  douyinCollector:!!getSecret('DOUYIN_COLLECTOR_ENDPOINT'),
-  xiaohongshuCollector:!!getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'),
-  publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')
-};}
+export function configuredServices(){
+  const apify=!!getSecret('APIFY_API_TOKEN');
+  return {
+    openai:!!getSecret('OPENAI_API_KEY'),
+    pexels:!!getSecret('PEXELS_API_KEY'),
+    youtube:!!getSecret('YOUTUBE_API_KEY'),
+    serpapi:!!getSecret('SERPAPI_API_KEY'),
+    apify,
+    coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),
+    douyinCollector:apify||!!getSecret('DOUYIN_COLLECTOR_ENDPOINT'),
+    xiaohongshuCollector:apify||!!getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'),
+    publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')
+  };
+}
