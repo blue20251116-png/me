@@ -23,7 +23,17 @@ app.use('/api/trends', trendsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/discovery', discoveryRouter);
 app.use('/api/discovery-auto', discoveryAutoRouter);
-app.use('/storage', express.static(path.join(__dirname, '..', 'storage')));
+
+// Serve exactly the same root used by storagePath(). This prevents generated files
+// from being written to one directory while Express serves another after Railway config changes.
+const storageRoot=path.resolve(process.env.STORAGE_ROOT||path.join(__dirname,'..','storage'));
+app.use('/storage',express.static(storageRoot,{fallthrough:true}));
+// Mobile video clients can occasionally send a stale byte range after a generated file
+// has been replaced. Keep that expected 416 from dumping a send stack trace into Railway logs.
+app.use('/storage',(err,req,res,next)=>{
+  if(err?.status===416||err?.statusCode===416){res.status(416).set('Content-Range','bytes */0').end();return;}
+  next(err);
+});
 app.use('/', express.static(path.join(__dirname, '..', 'admin')));
 function commandAvailable(command){
   try{const r=spawnSync(command,['-version'],{stdio:'ignore'});return !r.error && r.status===0;}catch{return false;}
