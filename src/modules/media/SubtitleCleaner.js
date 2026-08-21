@@ -3,20 +3,41 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { storagePath } from '../../lib/util.js';
 
+function validDims(width,height){return Number.isFinite(width)&&Number.isFinite(height)&&width>1&&height>1;}
+function parseFfmpegDims(stderr=''){
+  const matches=[...String(stderr).matchAll(/Video:.*?(\d{2,5})x(\d{2,5})/g)];
+  if(!matches.length)return null;
+  const m=matches[matches.length-1];const width=Number(m[1]),height=Number(m[2]);
+  return validDims(width,height)?{width,height}:null;
+}
 function probeVideo(file){
-  const r=spawnSync('ffprobe',['-v','error','-select_streams','v:0','-show_entries','stream=width,height','-of','json',file],{encoding:'utf8'});
-  if(r.status!==0) throw new Error('ffprobe 영상 크기 확인 실패');
-  const stream=JSON.parse(r.stdout||'{}')?.streams?.[0]||{};
-  const width=Number(stream.width),height=Number(stream.height);
-  if(!width||!height) throw new Error('영상 해상도 확인 실패');
-  return {width,height};
+  try{
+    const r=spawnSync('ffprobe',['-v','error','-select_streams','v:0','-show_entries','stream=width,height','-of','json',file],{encoding:'utf8',timeout:15000});
+    if(r.status===0){
+      const stream=JSON.parse(r.stdout||'{}')?.streams?.[0]||{};
+      const width=Number(stream.width),height=Number(stream.height);
+      if(validDims(width,height))return {width,height,method:'ffprobe'};
+    }
+  }catch{}
+
+  // Some social-media MP4s have unusual metadata that ffprobe may not parse,
+  // while ffmpeg can still decode them. Use ffmpeg's stream info as fallback.
+  try{
+    const r=spawnSync('ffmpeg',['-hide_banner','-i',file,'-f','null','-'],{encoding:'utf8',timeout:20000});
+    const dims=parseFfmpegDims(r.stderr||'');
+    if(dims)return {...dims,method:'ffmpeg'};
+  }catch{}
+
+  // Last resort: use the common vertical-video canvas so subtitle cleaning does
+  // not block the rest of the pipeline. FFmpeg itself will still validate input.
+  return {width:1080,height:1920,method:'default'};
 }
 
 function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
 
 export function cleanChineseSubtitles({postId,inputPath,mode='DELOGO',region=null}){
   if(!inputPath||!fs.existsSync(inputPath)) throw new Error('원본 영상 파일이 없습니다.');
-  const {width,height}=probeVideo(inputPath);
+  const {width,height,method}=probeVideo(inputPath);
   const safe=region||{};
   const x=clamp(Number(safe.x??Math.round(width*0.04)),0,width-2);
   const w=clamp(Number(safe.w??Math.round(width*0.92)),2,width-x);
@@ -31,7 +52,7 @@ export function cleanChineseSubtitles({postId,inputPath,mode='DELOGO',region=nul
   }else{
     filter=`delogo=x=${x}:y=${y}:w=${w}:h=${h}:show=0`;
   }
-  const r=spawnSync('ffmpeg',['-y','-i',inputPath,'-vf',filter,'-map','0:v:0','-map','0:a?','-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','-b:a','160k','-movflags','+faststart',out],{encoding:'utf8'});
+  const r=spawnSync('ffmpeg',['-y','-i',inputPath,'-vf',filter,'-map','0:v:0','-map','0:a?','-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','-b:a','160k','-movflags','+faststart',out],{encoding:'utf8',timeout:180000});
   if(r.status!==0||!fs.existsSync(out)) throw new Error(`자막 제거 ffmpeg 실패: ${String(r.stderr||'').slice(-500)}`);
-  return {outputPath:out,mode:String(mode).toUpperCase(),region:{x,y,w,h},width,height};
+  return {outputPath:out,mode:String(mode).toUpperCase(),region:{x,y,w,h},width,height,probeMethod:method};
 }

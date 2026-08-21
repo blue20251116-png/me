@@ -57,6 +57,7 @@ function xhsDownloadedUrl(raw){
   const result=raw?.result||raw||{};const medias=Array.isArray(result.medias)?result.medias:[];
   return medias.find(m=>String(m?.type||'').toLowerCase()==='video'&&/^https?:\/\//i.test(m?.url||''))?.url||videoUrlFrom(result);
 }
+function popularity(x){return Number(x.likes||0)*4+Number(x.comments||0)*3+Number(x.shares||0)*5+Number(x.views||0)*0.02;}
 
 export class ApifyDouyinCollector extends BaseSocialCollector{
   constructor(){super('DOUYIN');}
@@ -70,8 +71,10 @@ export class ApifyXiaohongshuCollector extends BaseSocialCollector{
   constructor(){super('XIAOHONGSHU');}
   async discover(target){
     const keyword=String(target.target_value||'').trim();if(!keyword)return [];
-    const search=await runActor(XHS_SEARCH_ACTOR,{mode:'search',keywords:[keyword],maxItems:10});
-    const normalized=search.map(xhsSearchNormalize).filter(x=>x?.sourceUrl);
+    // EasyApi actor schema requires maxItems >= 30. Fetch the minimum allowed,
+    // then keep only the top 10 candidates locally to control downstream cost.
+    const search=await runActor(XHS_SEARCH_ACTOR,{mode:'search',keywords:[keyword],maxItems:30});
+    const normalized=search.map(xhsSearchNormalize).filter(x=>x?.sourceUrl).sort((a,b)=>popularity(b)-popularity(a)).slice(0,10);
     const need=normalized.filter(x=>!x.videoUrl).slice(0,10);
     if(need.length){
       const downloaded=await runActor(XHS_VIDEO_ACTOR,{links:need.map(x=>x.sourceUrl)});
