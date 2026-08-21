@@ -10,6 +10,7 @@ import { trendsRouter } from './routes/trends.js';
 import { settingsRouter } from './routes/settings.js';
 import { discoveryRouter } from './routes/discovery.js';
 import { configuredServices } from './lib/settingsStore.js';
+import { startSocialMonitor } from './workers/socialMonitor.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 initSchema();
 const app = express();
@@ -32,4 +33,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ok:true,services:{...services,ffmpeg:commandAvailable('ffmpeg'),ffprobe:commandAvailable('ffprobe')}});
 });
 const port = process.env.PORT || 4100;
-app.listen(port, () => console.log(`yt-shorts-global API listening on :${port}`));
+app.listen(port, () => {
+  console.log(`yt-shorts-global API listening on :${port}`);
+  startSocialMonitor();
+});
