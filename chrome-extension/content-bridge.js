@@ -3,7 +3,7 @@
   window.__ME_INSTAGRAM_BRIDGE_CONTENT__=true;
 
   function announce(){
-    window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'READY',version:'1.1.3'},'*');
+    window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'READY',version:'1.1.4'},'*');
   }
 
   announce();
