@@ -4,13 +4,17 @@ import path from 'node:path';
 import { db } from '../db/db.js';
 
 const KEY_FILE=process.env.SETTINGS_KEY_FILE||'./storage/.settings.key';
-const ALLOWED=new Set(['OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY']);
+const ALLOWED=new Set([
+  'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY',
+  'COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY','COUPANG_SUB_ID',
+  'DOUYIN_COLLECTOR_ENDPOINT','DOUYIN_COLLECTOR_TOKEN',
+  'XIAOHONGSHU_COLLECTOR_ENDPOINT','XIAOHONGSHU_COLLECTOR_TOKEN',
+  'PUBLIC_BASE_URL'
+]);
 
 function masterKey(){
   fs.mkdirSync(path.dirname(KEY_FILE),{recursive:true});
-  if(!fs.existsSync(KEY_FILE)){
-    fs.writeFileSync(KEY_FILE,crypto.randomBytes(32),{mode:0o600});
-  }
+  if(!fs.existsSync(KEY_FILE))fs.writeFileSync(KEY_FILE,crypto.randomBytes(32),{mode:0o600});
   return fs.readFileSync(KEY_FILE);
 }
 function encrypt(value){
@@ -54,5 +58,8 @@ export function configuredServices(){return {
   pexels:!!getSecret('PEXELS_API_KEY'),
   youtube:!!getSecret('YOUTUBE_API_KEY'),
   serpapi:!!getSecret('SERPAPI_API_KEY'),
-  coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY')
+  coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),
+  douyinCollector:!!getSecret('DOUYIN_COLLECTOR_ENDPOINT'),
+  xiaohongshuCollector:!!getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'),
+  publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')
 };}
