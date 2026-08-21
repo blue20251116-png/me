@@ -6,6 +6,7 @@ const APIFY_BASE='https://api.apify.com/v2';
 const DOUYIN_ACTOR='vulnv~douyin-search-scraper';
 const XHS_SEARCH_ACTOR='easyapi~all-in-one-rednote-xiaohongshu-scraper';
 const XHS_VIDEO_ACTOR='easyapi~rednote-xiaohongshu-video-downloader';
+const INSTAGRAM_REELS_ACTOR='instagram-scraper~instagram-profile-reels-scraper';
 
 function token(){const t=getSecret('APIFY_API_TOKEN');if(!t)throw new Error('APIFY_API_TOKEN이 설정되어 있지 않습니다.');return t;}
 async function runActor(actorId,input,timeoutMs=120000){
@@ -78,6 +79,26 @@ function xhsDownloadedUrl(raw){
   const explicit=medias.find(m=>String(m?.type||'').toLowerCase()==='video'&&/^https?:\/\//i.test(m?.url||'')&&!isAudioCandidate(m.url,'medias.video'))?.url;
   return explicit||videoUrlFrom(result);
 }
+function instagramNormalize(raw,username){
+  const x=raw?.item||raw||{};const owner=x.owner||x.user||x.author||{};
+  const shortcode=String(first(x.shortCode,x.shortcode,x.code,x.id,x.pk,'')).trim();if(!shortcode)return null;
+  const sourceUrl=first(x.url,x.postUrl,x.reelUrl,x.inputUrl,shortcode?`https://www.instagram.com/reel/${shortcode}/`:null);
+  return {
+    externalPostId:shortcode,
+    sourceUrl,
+    videoUrl:videoUrlFrom(x),
+    thumbnailUrl:imageUrlFrom(x),
+    caption:String(first(x.caption,x.text,x.description,x.title,'')),
+    authorId:String(first(owner.id,owner.pk,x.ownerId,'')),
+    authorName:String(first(owner.username,x.ownerUsername,x.username,username,'')),
+    publishedAt:first(x.timestamp,x.takenAt,x.taken_at,x.publishedAt,null),
+    views:num(first(x.videoPlayCount,x.playCount,x.views,x.videoViewCount,0)),
+    likes:num(first(x.likesCount,x.likeCount,x.likes,0)),
+    comments:num(first(x.commentsCount,x.commentCount,x.comments,0)),
+    shares:num(first(x.sharesCount,x.shareCount,x.shares,0)),
+    metadata:raw
+  };
+}
 function popularity(x){return Number(x.likes||0)*4+Number(x.comments||0)*3+Number(x.shares||0)*5+Number(x.views||0)*0.02;}
 
 export class ApifyDouyinCollector extends BaseSocialCollector{
@@ -101,5 +122,13 @@ export class ApifyXiaohongshuCollector extends BaseSocialCollector{
       for(const x of need)x.videoUrl=byUrl.get(String(x.sourceUrl))||'';
     }
     return normalized.filter(x=>x.videoUrl);
+  }
+}
+export class ApifyInstagramCollector extends BaseSocialCollector{
+  constructor(){super('INSTAGRAM');}
+  async discover(target){
+    const username=String(target.target_value||'').replace(/^@/,'').trim();if(!username)return [];
+    const items=await runActor(INSTAGRAM_REELS_ACTOR,{instagramUsernames:[username]},90000);
+    return items.map(x=>instagramNormalize(x,username)).filter(x=>x?.sourceUrl&&x?.videoUrl).sort((a,b)=>popularity(b)-popularity(a)).slice(0,8);
   }
 }
