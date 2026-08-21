@@ -3,6 +3,10 @@ const MAX_FINAL=3;
 const TARGET_BUFFER=4;
 const BATCH_SIZE=2;
 
+function validReelCode(code=''){
+  const s=String(code||'').trim();
+  return /^[A-Za-z0-9_-]{8,30}$/.test(s) && !/^[a-z]{2}_[A-Z]{2}$/.test(s);
+}
 async function api(baseUrl,pin,path,opt={}){
   const r=await fetch(`${baseUrl}${path}`,{...opt,headers:{'content-type':'application/json','x-admin-pin':pin,...(opt.headers||{})}});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||`ME HTTP ${r.status}`);return j;
@@ -18,11 +22,12 @@ async function collectLinks(tabId){
   const [{result=[]}]=await chrome.scripting.executeScript({target:{tabId},func:async()=>{
     const wait=ms=>new Promise(r=>setTimeout(r,ms));
     const map=new Map();
-    const add=(href,text='')=>{try{const full=new URL(href,location.origin).href;const m=full.match(/instagram\.com\/reel\/([A-Za-z0-9_-]+)/i);if(!m)return;const clean=`https://www.instagram.com/reel/${m[1]}/`;const prev=map.get(clean);if(!prev||String(text).length>String(prev.text||'').length)map.set(clean,{href:clean,text:String(text||'').trim().slice(0,1200)});}catch{}};
+    const valid=code=>/^[A-Za-z0-9_-]{8,30}$/.test(String(code||''))&&!/^[a-z]{2}_[A-Z]{2}$/.test(String(code||''));
+    const add=(href,text='')=>{try{const full=new URL(href,location.origin).href;const m=full.match(/instagram\.com\/reel\/([A-Za-z0-9_-]+)/i);if(!m||!valid(m[1]))return;const clean=`https://www.instagram.com/reel/${m[1]}/`;const prev=map.get(clean);if(!prev||String(text).length>String(prev.text||'').length)map.set(clean,{href:clean,text:String(text||'').trim().slice(0,1200)});}catch{}};
     const scan=()=>{
       for(const a of document.querySelectorAll('a[href*="/reel/"]'))add(a.getAttribute('href')||'',a.innerText||a.parentElement?.innerText||'');
       const html=document.documentElement?.innerHTML||'';
-      for(const re of [/\\?\/reel\\?\/([A-Za-z0-9_-]{5,})\\?\//g,/"shortcode"\s*:\s*"([A-Za-z0-9_-]{5,})"/g,/"code"\s*:\s*"([A-Za-z0-9_-]{5,})"/g]){let m,guard=0;while((m=re.exec(html))&&guard++<100)add(`/reel/${m[1]}/`,'');}
+      for(const re of [/\\?\/reel\\?\/([A-Za-z0-9_-]{8,30})\\?\//g,/"shortcode"\s*:\s*"([A-Za-z0-9_-]{8,30})"/g]){let m,guard=0;while((m=re.exec(html))&&guard++<100){if(valid(m[1]))add(`/reel/${m[1]}/`,'');}}
     };
     scan();
     if(map.size<4){window.scrollBy(0,Math.max(window.innerHeight*1.4,900));await wait(650);scan();}
@@ -63,21 +68,27 @@ async function collectDetail(tabId,username,sourceUrl,seedText=''){
 }
 async function openHidden(url){const tab=await chrome.tabs.create({url,active:false});await waitTab(tab.id);return tab;}
 async function mirrorVideo(baseUrl,pin,d,diag){
-  if(!d?.videoUrl)return d;
+  if(!d?.videoUrl||!validReelCode(d.externalPostId))return d;
   diag.videoUrlFound++;
   try{
     const r=await fetch(d.videoUrl,{credentials:'include',cache:'no-store'});
     if(!r.ok)throw new Error(`CDN HTTP ${r.status}`);
+    const contentType=String(r.headers.get('content-type')||'').toLowerCase();
+    if(contentType&&(contentType.startsWith('text/')||contentType.startsWith('image/')||contentType.includes('json')))throw new Error(`영상이 아닌 응답입니다 (${contentType})`);
     const blob=await r.blob();
-    if(blob.size<1024)throw new Error('영상 데이터가 너무 작습니다');
+    if(blob.size<100*1024)throw new Error(`영상 데이터가 너무 작습니다 (${blob.size} bytes)`);
     if(blob.size>95*1024*1024)throw new Error('영상이 95MB를 초과합니다');
-    const up=await fetch(`${baseUrl}/api/browser-bridge/upload-video/${encodeURIComponent(d.externalPostId)}`,{method:'POST',headers:{'x-admin-pin':pin,'content-type':'application/octet-stream'},body:await blob.arrayBuffer()});
+    const buffer=await blob.arrayBuffer();
+    const head=new Uint8Array(buffer.slice(0,16));
+    const signature=head.length>=8?String.fromCharCode(head[4],head[5],head[6],head[7]):'';
+    if(signature!=='ftyp')throw new Error(`MP4 시그니처가 아닙니다 (${signature||'empty'})`);
+    const up=await fetch(`${baseUrl}/api/browser-bridge/upload-video/${encodeURIComponent(d.externalPostId)}`,{method:'POST',headers:{'x-admin-pin':pin,'content-type':'video/mp4'},body:buffer});
     const j=await up.json().catch(()=>({}));if(!up.ok)throw new Error(j.error||`upload HTTP ${up.status}`);
     diag.mirrored++;
     console.log(`[ME Bridge] mirrored reel=${d.externalPostId} bytes=${j.bytes||blob.size}`);
     return {...d,videoUrl:j.url||d.videoUrl,mirrored:true};
   }catch(e){
-    diag.mirrorFailed++;console.warn(`[ME Bridge] mirror failed reel=${d.externalPostId}`,e);return d;
+    diag.mirrorFailed++;console.warn(`[ME Bridge] mirror failed reel=${d.externalPostId}`,e);return {...d,videoUrl:'',mirrored:false};
   }
 }
 async function candidateFromTarget(target,baseUrl,pin,diag){
@@ -94,7 +105,8 @@ async function candidateFromTarget(target,baseUrl,pin,diag){
         diag.detailsTried++;
         detailTab=await openHidden(choice.href);
         let d=await collectDetail(detailTab.id,target.username,choice.href,choice.text);
-        if(d?.videoUrl&&d?.externalPostId){d=await mirrorVideo(baseUrl,pin,d,diag);console.log(`[ME Bridge] valid account=${target.username} reel=${d.externalPostId} mirrored=${d.mirrored?'yes':'no'}`);return d;}
+        if(!validReelCode(d?.externalPostId)){console.warn(`[ME Bridge] invalid reel id=${d?.externalPostId||'-'} url=${choice.href}`);continue;}
+        if(d?.videoUrl){d=await mirrorVideo(baseUrl,pin,d,diag);if(d?.mirrored){console.log(`[ME Bridge] valid account=${target.username} reel=${d.externalPostId} mirrored=yes`);return d;}}
       }catch(e){console.warn('[ME Bridge] detail failed',choice.href,e);}finally{if(detailTab?.id)await chrome.tabs.remove(detailTab.id).catch(()=>{});}
     }
   }catch(e){console.warn('[ME Bridge] profile failed',target.username,e);}finally{if(profileTab?.id)await chrome.tabs.remove(profileTab.id).catch(()=>{});}
@@ -108,7 +120,7 @@ async function runBridge(baseUrl,pin){
   for(let i=0;i<targets.length&&candidates.length<TARGET_BUFFER;i+=BATCH_SIZE){
     const batch=targets.slice(i,i+BATCH_SIZE);checked+=batch.length;
     const results=await Promise.all(batch.map(target=>candidateFromTarget(target,baseUrl,pin,diagnostics)));
-    for(const d of results){if(!d||seen.has(d.externalPostId))continue;seen.add(d.externalPostId);candidates.push(d);if(candidates.length>=TARGET_BUFFER)break;}
+    for(const d of results){if(!d||!validReelCode(d.externalPostId)||seen.has(d.externalPostId))continue;seen.add(d.externalPostId);candidates.push(d);if(candidates.length>=TARGET_BUFFER)break;}
     console.log(`[ME Bridge] progress checked=${checked}/${targets.length} valid=${candidates.length}/${TARGET_BUFFER}`);
     if(candidates.length>=TARGET_BUFFER)break;
     await sleep(250);
