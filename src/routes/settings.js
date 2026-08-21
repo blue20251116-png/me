@@ -2,7 +2,7 @@ import express from 'express';
 import { configuredServices, hasAdminPin, setAdminPin, setSecret, verifyAdminPin } from '../lib/settingsStore.js';
 export const settingsRouter=express.Router();
 const ALLOWED_KEYS=[
-  'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY',
+  'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','APIFY_API_TOKEN',
   'COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY','COUPANG_SUB_ID',
   'DOUYIN_COLLECTOR_ENDPOINT','DOUYIN_COLLECTOR_TOKEN',
   'XIAOHONGSHU_COLLECTOR_ENDPOINT','XIAOHONGSHU_COLLECTOR_TOKEN',
