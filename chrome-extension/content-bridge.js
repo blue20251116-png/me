@@ -3,7 +3,7 @@
   window.__ME_INSTAGRAM_BRIDGE_CONTENT__=true;
 
   function announce(){
-    window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'READY',version:'1.1.2'},'*');
+    window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'READY',version:'1.1.3'},'*');
   }
 
   announce();
@@ -18,6 +18,8 @@
       return;
     }
     if(msg.type!=='RUN_INSTAGRAM_BRIDGE')return;
+
+    window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'STARTED'},'*');
     try{
       const result=await chrome.runtime.sendMessage({type:'RUN_BRIDGE_FROM_ADMIN',baseUrl:location.origin});
       window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'RESULT',result},'*');
