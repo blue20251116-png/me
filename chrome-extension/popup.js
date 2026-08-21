@@ -1,0 +1,5 @@
+const $=id=>document.getElementById(id);
+async function load(){const s=await chrome.storage.local.get(['baseUrl','pin']);$('baseUrl').value=s.baseUrl||'';$('pin').value=s.pin||'';}
+$('save').addEventListener('click',async()=>{const baseUrl=$('baseUrl').value.trim().replace(/\/$/,'');const pin=$('pin').value.trim();if(!baseUrl||!pin)return $('status').textContent='서버 주소와 관리자 PIN을 입력하세요';await chrome.storage.local.set({baseUrl,pin});$('status').textContent='설정 저장 완료';});
+$('run').addEventListener('click',async()=>{const baseUrl=$('baseUrl').value.trim().replace(/\/$/,'');const pin=$('pin').value.trim();if(!baseUrl||!pin)return $('status').textContent='서버 주소와 관리자 PIN을 입력하세요';await chrome.storage.local.set({baseUrl,pin});$('run').disabled=true;$('status').textContent='벤치마킹 계정을 확인하고 있습니다…';try{const r=await chrome.runtime.sendMessage({type:'RUN_BRIDGE',baseUrl,pin});if(!r?.ok)throw new Error(r?.error||'수집 실패');$('status').textContent=`완료\n계정 ${r.targets||0}개 확인\n후보 ${r.candidates||0}개\nME 저장 ${r.selected||0}개`; }catch(e){$('status').textContent=`실패: ${e.message||e}`;}finally{$('run').disabled=false;}});
+load();
