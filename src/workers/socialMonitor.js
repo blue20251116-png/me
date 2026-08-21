@@ -14,9 +14,11 @@ function saveDiscovered(target,x){
   return true;
 }
 
+function isApifyHardLimit(err){return /Monthly usage hard limit exceeded|platform-feature-disabled/i.test(String(err?.message||err));}
+
 export async function runSocialMonitorOnce(){
   const targets=db.prepare("SELECT * FROM social_monitor_targets WHERE enabled=1 AND platform='INSTAGRAM' AND target_type='ACCOUNT' ORDER BY last_checked_at IS NOT NULL,last_checked_at ASC").all();
-  let discovered=0;
+  let discovered=0,blocked=false,blockReason='';
   for(const target of targets){
     try{
       const collector=collectorFor('INSTAGRAM');
@@ -24,10 +26,16 @@ export async function runSocialMonitorOnce(){
       for(const item of items)if(saveDiscovered(target,item))discovered++;
       db.prepare('UPDATE social_monitor_targets SET last_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(target.id);
     }catch(err){
-      console.error(`[InstagramMonitor] account=${target.target_value} reason=${String(err?.message||err)}`);
+      const reason=String(err?.message||err);
+      console.error(`[InstagramMonitor] account=${target.target_value} reason=${reason}`);
+      if(isApifyHardLimit(err)){
+        blocked=true;blockReason='Apify 월 사용량 hard limit 초과';
+        console.error('[InstagramMonitor] Apify hard limit detected; remaining accounts skipped to avoid repeated 403 calls');
+        break;
+      }
     }
   }
-  return {targets:targets.length,discovered,platform:'INSTAGRAM'};
+  return {targets:targets.length,discovered,platform:'INSTAGRAM',blocked,blockReason};
 }
 
 export function startSocialMonitor(){
