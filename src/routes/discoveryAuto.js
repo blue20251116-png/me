@@ -11,7 +11,8 @@ const DEFAULT_TARGETS={
   XIAOHONGSHU:['收纳好物','家居好物','厨房好物','车载好物','生活好物']
 };
 
-const runState={running:false,stage:'IDLE',message:'대기 중',startedAt:null,finishedAt:null,newPosts:0,totalPosts:0,queued:0,processed:0,succeeded:0,failed:0,currentPostId:null,lastError:null};
+const MAX_ANALYSIS_FAILURES=3;
+const runState={running:false,stage:'IDLE',message:'대기 중',startedAt:null,finishedAt:null,newPosts:0,totalPosts:0,queued:0,retryQueued:0,processed:0,succeeded:0,failed:0,currentPostId:null,lastError:null};
 
 function collectorStatus(){
   const apify=Boolean(getSecret('APIFY_API_TOKEN'));
@@ -49,8 +50,26 @@ async function analyzePost(postId){
   return parsed;
 }
 
+function analysisQueue(){
+  return db.prepare(`
+    SELECT p.id,p.status,
+      (SELECT COUNT(*) FROM social_job_logs l WHERE l.post_id=p.id AND l.stage='ANALYSIS_FAILED') AS failure_count
+    FROM social_posts p
+    WHERE COALESCE(p.video_url,'')<>''
+      AND (
+        p.status='DISCOVERED'
+        OR (
+          p.status='ANALYSIS_FAILED'
+          AND (SELECT COUNT(*) FROM social_job_logs l2 WHERE l2.post_id=p.id AND l2.stage='ANALYSIS_FAILED') < ?
+        )
+      )
+    ORDER BY CASE WHEN p.status='ANALYSIS_FAILED' THEN 0 ELSE 1 END, p.updated_at DESC, p.created_at DESC
+    LIMIT 20
+  `).all(MAX_ANALYSIS_FAILURES);
+}
+
 async function executeOneClick(){
-  runState.running=true;runState.stage='COLLECTING';runState.message='Apify에서 Douyin·Xiaohongshu 인기 상품영상을 찾고 있습니다';runState.startedAt=new Date().toISOString();runState.finishedAt=null;runState.newPosts=0;runState.queued=0;runState.processed=0;runState.succeeded=0;runState.failed=0;runState.currentPostId=null;runState.lastError=null;
+  runState.running=true;runState.stage='COLLECTING';runState.message='Apify에서 Douyin·Xiaohongshu 인기 상품영상을 찾고 있습니다';runState.startedAt=new Date().toISOString();runState.finishedAt=null;runState.newPosts=0;runState.queued=0;runState.retryQueued=0;runState.processed=0;runState.succeeded=0;runState.failed=0;runState.currentPostId=null;runState.lastError=null;
   console.log('[DiscoveryAuto] one-click started');
   try{
     ensureDefaultTargets();
@@ -59,11 +78,15 @@ async function executeOneClick(){
     const after=Number(db.prepare('SELECT COUNT(*) FROM social_posts').pluck().get()||0);
     runState.newPosts=Math.max(0,after-before);runState.totalPosts=after;
     console.log(`[DiscoveryAuto] collection done new=${runState.newPosts} total=${after}`);
-    const posts=db.prepare("SELECT id FROM social_posts WHERE status='DISCOVERED' AND COALESCE(video_url,'')<>'' ORDER BY created_at DESC LIMIT 20").all();
-    runState.queued=posts.length;runState.stage='ANALYZING';runState.message=posts.length?`새 영상 ${posts.length}개를 자동 분석하고 있습니다`:'새로 분석할 영상이 없습니다';
-    console.log(`[DiscoveryAuto] analysis queue=${posts.length}`);
+    const posts=analysisQueue();
+    runState.queued=posts.length;
+    runState.retryQueued=posts.filter(p=>p.status==='ANALYSIS_FAILED').length;
+    runState.stage='ANALYZING';
+    runState.message=posts.length?`영상 ${posts.length}개를 자동 분석하고 있습니다${runState.retryQueued?` · 재시도 ${runState.retryQueued}개`:''}`:'새로 분석하거나 재시도할 영상이 없습니다';
+    console.log(`[DiscoveryAuto] analysis queue=${posts.length} retry=${runState.retryQueued}`);
     for(const p of posts){
       runState.currentPostId=p.id;
+      if(p.status==='ANALYSIS_FAILED')console.log(`[DiscoveryAuto] retrying failed post=${p.id} previousFailures=${Number(p.failure_count||0)}`);
       try{await analyzePost(p.id);runState.succeeded++;}
       catch(err){runState.failed++;runState.lastError=String(err?.message||err).slice(0,500);console.error(`[DiscoveryAuto] post failed post=${p.id} reason=${runState.lastError}`);}
       finally{runState.processed++;}
