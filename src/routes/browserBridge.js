@@ -18,6 +18,7 @@ function auth(req,res,next){
   next();
 }
 function num(v){const n=Number(v);return Number.isFinite(n)?n:0;}
+function validReelCode(code=''){const s=String(code||'').trim();return /^[A-Za-z0-9_-]{8,30}$/.test(s)&&!/^[a-z]{2}_[A-Z]{2}$/.test(s);}
 function cueScore(caption=''){
   const s=String(caption||'').toLowerCase();let score=0;
   if(/프로필|링크|인포크|구매|제품|상품|공구|추천|쿠팡|공구마켓|제품정보/.test(s))score+=8000;
@@ -66,9 +67,11 @@ browserBridgeRouter.get('/status',auth,(_req,res)=>res.json({ok:true,maxPerRun:M
 
 browserBridgeRouter.post('/upload-video/:externalPostId',auth,express.raw({type:['application/octet-stream','video/*'],limit:'100mb'}),(req,res)=>{
   try{
-    const externalPostId=String(req.params.externalPostId||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,100);
-    if(!externalPostId)return res.status(400).json({error:'Reel ID가 필요합니다.'});
-    if(!Buffer.isBuffer(req.body)||req.body.length<1024)return res.status(400).json({error:'영상 데이터가 비어 있습니다.'});
+    const externalPostId=String(req.params.externalPostId||'').trim();
+    if(!validReelCode(externalPostId))return res.status(400).json({error:'유효한 Instagram Reel ID가 아닙니다.'});
+    if(!Buffer.isBuffer(req.body)||req.body.length<100*1024)return res.status(400).json({error:'영상 데이터가 너무 작거나 비어 있습니다.'});
+    const signature=req.body.length>=8?req.body.subarray(4,8).toString('ascii'):'';
+    if(signature!=='ftyp')return res.status(400).json({error:'MP4 파일 형식이 아닙니다.'});
     const file=`${externalPostId}.mp4`;const target=path.join(bridgeDir,file);
     fs.writeFileSync(target,req.body);
     const url=`${publicBase(req)}/storage/bridge/${encodeURIComponent(file)}`;
@@ -82,7 +85,7 @@ browserBridgeRouter.post('/submit',auth,(req,res)=>{
     const input=Array.isArray(req.body?.candidates)?req.body.candidates:[];state.received=input.length;
     const diag=req.body?.diagnostics&&typeof req.body.diagnostics==='object'?req.body.diagnostics:{};
     const clean=[];const seen=new Set();
-    for(const raw of input){const x=normalize(raw);if(!x.externalPostId||!x.sourceUrl||!x.videoUrl||!x.username||seen.has(x.externalPostId)||exists(x.externalPostId))continue;seen.add(x.externalPostId);clean.push(x);}
+    for(const raw of input){const x=normalize(raw);const sourceId=(x.sourceUrl.match(/instagram\.com\/(?:reel|reels)\/([A-Za-z0-9_-]+)/i)||[])[1]||'';if(!validReelCode(x.externalPostId)||sourceId!==x.externalPostId||!x.sourceUrl||!x.videoUrl||!x.username||seen.has(x.externalPostId)||exists(x.externalPostId))continue;seen.add(x.externalPostId);clean.push(x);}
     clean.sort((a,b)=>score(b)-score(a));
     const selected=clean.slice(0,MAX_PER_RUN);state.selected=selected.length;
     const ids=[];for(const x of selected){const id=save(x);if(id)ids.push(id);}
