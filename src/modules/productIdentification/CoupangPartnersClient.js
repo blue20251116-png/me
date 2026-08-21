@@ -4,6 +4,9 @@ import { withRetry } from '../../lib/retry.js';
 
 const HOST='https://api-gateway.coupang.com';
 const BASE='/v2/providers/affiliate_open_api/apis/openapi/v1';
+const SEARCH_MAX_PER_MINUTE=40;
+const SEARCH_RESULT_LIMIT=2;
+const searchCalls=[];
 function signedDate(){return new Date().toISOString().slice(2,19).replace(/[-:]/g,'')+'Z';}
 function auth(method,path,query=''){
   const accessKey=getSecret('COUPANG_ACCESS_KEY');
@@ -13,6 +16,17 @@ function auth(method,path,query=''){
   const message=datetime+method+path+query;
   const signature=crypto.createHmac('sha256',secretKey).update(message).digest('hex');
   return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetime}, signature=${signature}`;
+}
+function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
+async function waitForSearchSlot(){
+  while(true){
+    const now=Date.now();
+    while(searchCalls.length&&now-searchCalls[0]>=60_000)searchCalls.shift();
+    if(searchCalls.length<SEARCH_MAX_PER_MINUTE){searchCalls.push(now);return;}
+    const wait=Math.max(250,60_000-(now-searchCalls[0])+100);
+    console.warn(`[Coupang][RATE GUARD] search ${searchCalls.length}/${SEARCH_MAX_PER_MINUTE} · ${wait}ms 대기`);
+    await sleep(wait);
+  }
 }
 async function request(method,path,query='',body=null){
   return withRetry(async()=>{
@@ -25,12 +39,14 @@ async function request(method,path,query='',body=null){
     return json.data;
   },{attempts:2,label:`coupang:${method}:${path}`});
 }
-export async function searchCoupangProducts(keyword,{limit=10,subId=''}={}){
+export async function searchCoupangProducts(keyword,{limit=SEARCH_RESULT_LIMIT,subId=''}={}){
+  await waitForSearchSlot();
   const path=`${BASE}/products/search`;
-  const qs=new URLSearchParams({keyword:String(keyword),limit:String(Math.max(1,Math.min(10,limit))),imageSize:'512x512',srpLinkOnly:'false'});
+  const safeLimit=Math.max(1,Math.min(SEARCH_RESULT_LIMIT,Number(limit)||SEARCH_RESULT_LIMIT));
+  const qs=new URLSearchParams({keyword:String(keyword),limit:String(safeLimit),imageSize:'512x512',srpLinkOnly:'false'});
   if(subId) qs.set('subId',subId);
   const data=await request('GET',path,qs.toString());
-  return Array.isArray(data?.productData)?data.productData:[];
+  return Array.isArray(data?.productData)?data.productData.slice(0,SEARCH_RESULT_LIMIT):[];
 }
 export async function createCoupangDeepLink(coupangUrl,{subId=''}={}){
   const path=`${BASE}/deeplink`;
