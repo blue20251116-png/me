@@ -19,7 +19,7 @@ function validFile(file){
   try{return fs.statSync(file).size>4096;}catch{return false;}
 }
 function assertVideoStream(file){
-  const r=spawnSync('ffprobe',['-v','error','-select_streams','v:0','-show_entries','stream=codec_type,width,height','-of','json',file],{encoding:'utf8'});
+  const r=spawnSync('ffprobe',['-v','error','-select_streams','v:0','-show_entries','stream=codec_type,codec_name,codec_tag_string,width,height','-of','json',file],{encoding:'utf8'});
   let stream=null;
   try{stream=JSON.parse(r.stdout||'{}')?.streams?.[0]||null;}catch{}
   if(r.status!==0||!stream||stream.codec_type!=='video'||!Number(stream.width)||!Number(stream.height)){
@@ -29,6 +29,16 @@ function assertVideoStream(file){
       detail=String(f.stderr||'').trim().slice(-500);
     }
     throw new Error(`비디오 스트림이 없는 미디어입니다${detail?`: ${detail}`:''}`);
+  }
+
+  // Some Douyin files expose dimensions in ffprobe but use a codec (e.g. bvc2)
+  // that this Railway ffmpeg build cannot decode. Decode exactly one frame now so
+  // we can skip the bad candidate immediately instead of failing later in delogo/frame extraction.
+  const d=spawnSync('ffmpeg',['-v','error','-i',file,'-map','0:v:0','-frames:v','1','-f','null','-'],{encoding:'utf8',timeout:15000});
+  if(d.error||d.status!==0){
+    const codec=String(stream.codec_name||stream.codec_tag_string||'unknown');
+    const detail=String(d.stderr||d.error?.message||'').trim().slice(-500);
+    throw new Error(`지원하지 않는 영상 코덱입니다 codec=${codec}${detail?`: ${detail}`:''}`);
   }
 }
 
