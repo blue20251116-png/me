@@ -7,5 +7,20 @@ CREATE TABLE IF NOT EXISTS shorts_renders (id TEXT PRIMARY KEY,project_id TEXT,f
 CREATE TABLE IF NOT EXISTS shorts_publications (id TEXT PRIMARY KEY,project_id TEXT,youtube_video_id TEXT,title TEXT,description TEXT,hashtags TEXT,published_at DATETIME,status TEXT);
 CREATE TABLE IF NOT EXISTS shorts_metrics (id TEXT PRIMARY KEY,publication_id TEXT,hours_since_publish INTEGER,views INTEGER,likes INTEGER,comments INTEGER,avg_view_duration REAL,avg_percentage_viewed REAL,captured_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+
+CREATE TABLE IF NOT EXISTS social_monitor_targets (id TEXT PRIMARY KEY,platform TEXT NOT NULL,target_type TEXT NOT NULL,target_value TEXT NOT NULL,enabled INTEGER DEFAULT 1,last_checked_at DATETIME,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(platform,target_type,target_value));
+CREATE TABLE IF NOT EXISTS social_posts (id TEXT PRIMARY KEY,target_id TEXT,platform TEXT NOT NULL,external_post_id TEXT NOT NULL,author_id TEXT,author_name TEXT,source_url TEXT NOT NULL,caption TEXT,published_at DATETIME,views INTEGER DEFAULT 0,likes INTEGER DEFAULT 0,comments INTEGER DEFAULT 0,shares INTEGER DEFAULT 0,video_url TEXT,local_video_path TEXT,thumbnail_url TEXT,status TEXT DEFAULT 'DISCOVERED',error_message TEXT,metadata_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,UNIQUE(platform,external_post_id));
+CREATE TABLE IF NOT EXISTS social_job_logs (id TEXT PRIMARY KEY,post_id TEXT,platform TEXT,stage TEXT,reason TEXT,attempt INTEGER DEFAULT 1,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS video_frames (id TEXT PRIMARY KEY,post_id TEXT NOT NULL,timestamp REAL NOT NULL,local_path TEXT NOT NULL,public_url TEXT,file_size INTEGER,sharpness_score REAL,visual_score REAL,is_selected INTEGER DEFAULT 0,lens_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS product_candidates (id TEXT PRIMARY KEY,post_id TEXT NOT NULL,product_type TEXT,brand TEXT,model TEXT,material TEXT,color TEXT,features_json TEXT,usage_text TEXT,korean_name TEXT,search_queries_json TEXT,resolver_confidence REAL,status TEXT DEFAULT 'PRODUCT_FOUND',raw_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS coupang_matches (id TEXT PRIMARY KEY,candidate_id TEXT NOT NULL,product_id TEXT,product_name TEXT,product_price REAL,product_url TEXT,product_image TEXT,rank INTEGER,score REAL,status TEXT DEFAULT 'REVIEW_REQUIRED',affiliate_url TEXT,raw_json TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS content_jobs (id TEXT PRIMARY KEY,post_id TEXT,candidate_id TEXT,coupang_match_id TEXT,shorts_project_id TEXT,content_score REAL,status TEXT DEFAULT 'CONTENT_READY',created_at DATETIME DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+
 CREATE INDEX IF NOT EXISTS idx_projects_hash ON shorts_projects(content_hash);
 CREATE INDEX IF NOT EXISTS idx_metrics_pub ON shorts_metrics(publication_id);
+CREATE INDEX IF NOT EXISTS idx_social_posts_status ON social_posts(status);
+CREATE INDEX IF NOT EXISTS idx_social_posts_target ON social_posts(target_id);
+CREATE INDEX IF NOT EXISTS idx_frames_post ON video_frames(post_id);
+CREATE INDEX IF NOT EXISTS idx_candidates_post ON product_candidates(post_id);
+CREATE INDEX IF NOT EXISTS idx_matches_candidate ON coupang_matches(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_content_jobs_post ON content_jobs(post_id);
