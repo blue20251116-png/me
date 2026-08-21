@@ -9,126 +9,34 @@ const XHS_VIDEO_ACTOR='easyapi~rednote-xiaohongshu-video-downloader';
 const INSTAGRAM_REELS_ACTOR='instagram-scraper~instagram-profile-reels-scraper';
 
 function token(){const t=getSecret('APIFY_API_TOKEN');if(!t)throw new Error('APIFY_API_TOKEN이 설정되어 있지 않습니다.');return t;}
-async function runActor(actorId,input,timeoutMs=120000){
+async function runActor(actorId,input,timeoutMs=120000,attempts=2){
   return withRetry(async()=>{
     const u=new URL(`${APIFY_BASE}/acts/${actorId}/run-sync-get-dataset-items`);u.searchParams.set('token',token());
     const r=await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(timeoutMs)});
-    const text=await r.text();if(!r.ok)throw new Error(`Apify ${actorId} 오류 (${r.status}): ${text.slice(0,500)}`);
+    const text=await r.text();
+    if(!r.ok){
+      const err=new Error(`Apify ${actorId} 오류 (${r.status}): ${text.slice(0,500)}`);
+      err.status=r.status;
+      err.apifyHardLimit=r.status===403&&/Monthly usage hard limit exceeded|platform-feature-disabled/i.test(text);
+      throw err;
+    }
     const json=JSON.parse(text||'[]');return Array.isArray(json)?json:[];
-  },{attempts:2,label:`apify:${actorId}`});
+  },{attempts,label:`apify:${actorId}`});
 }
 function num(v){const n=Number(String(v??'').replace(/[^0-9.-]/g,''));return Number.isFinite(n)?n:0;}
 function first(...v){return v.find(x=>x!==undefined&&x!==null&&String(x).trim()!=='');}
-function collectUrls(obj,out=[],path='',depth=0){
-  if(depth>8||obj==null)return out;
-  if(typeof obj==='string'){
-    if(/^https?:\/\//i.test(obj))out.push({url:obj,path});
-    return out;
-  }
-  if(Array.isArray(obj)){for(let i=0;i<obj.length;i++)collectUrls(obj[i],out,`${path}[${i}]`,depth+1);return out;}
-  if(typeof obj==='object')for(const [k,v] of Object.entries(obj))collectUrls(v,out,path?`${path}.${k}`:k,depth+1);
-  return out;
-}
-function isAudioCandidate(url,path=''){
-  const s=`${path} ${url}`.toLowerCase();
-  return /(^|[._/-])(audio|music|sound|bgm|voice|song)([._/-]|$)/i.test(s)||/\.(?:mp3|m4a|aac|wav|ogg|flac)(?:\?|$)/i.test(url);
-}
-function isImageCandidate(url,path=''){
-  const s=`${path} ${url}`.toLowerCase();
-  return /(cover|thumb|image|poster|avatar)/i.test(s)||/\.(?:jpe?g|png|webp|gif)(?:\?|$)/i.test(url);
-}
-function videoScore({url,path}){
-  if(isAudioCandidate(url,path)||isImageCandidate(url,path))return -1000;
-  const s=String(path||'').toLowerCase();
-  let score=0;
-  if(/\.(?:mp4|mov|m4v|webm)(?:\?|$)/i.test(url))score+=120;
-  if(/downloadedvideo|downloadvideo|video_url|videourl|play_url|playurl|download_url|downloadurl/.test(s))score+=100;
-  if(/video/.test(s))score+=70;
-  if(/play|download|stream|media/.test(s))score+=35;
-  if(/watermark|cover|thumb|image|music|audio|sound/.test(s))score-=80;
-  return score;
-}
-function videoUrlFrom(x){
-  const candidates=collectUrls(x).filter(c=>!isAudioCandidate(c.url,c.path)&&!isImageCandidate(c.url,c.path)).map(c=>({...c,score:videoScore(c)})).filter(c=>c.score>0).sort((a,b)=>b.score-a.score);
-  return candidates[0]?.url||'';
-}
+function collectUrls(obj,out=[],path='',depth=0){if(depth>8||obj==null)return out;if(typeof obj==='string'){if(/^https?:\/\//i.test(obj))out.push({url:obj,path});return out;}if(Array.isArray(obj)){for(let i=0;i<obj.length;i++)collectUrls(obj[i],out,`${path}[${i}]`,depth+1);return out;}if(typeof obj==='object')for(const [k,v] of Object.entries(obj))collectUrls(v,out,path?`${path}.${k}`:k,depth+1);return out;}
+function isAudioCandidate(url,path=''){const s=`${path} ${url}`.toLowerCase();return /(^|[._/-])(audio|music|sound|bgm|voice|song)([._/-]|$)/i.test(s)||/\.(?:mp3|m4a|aac|wav|ogg|flac)(?:\?|$)/i.test(url);}
+function isImageCandidate(url,path=''){const s=`${path} ${url}`.toLowerCase();return /(cover|thumb|image|poster|avatar)/i.test(s)||/\.(?:jpe?g|png|webp|gif)(?:\?|$)/i.test(url);}
+function videoScore({url,path}){if(isAudioCandidate(url,path)||isImageCandidate(url,path))return -1000;const s=String(path||'').toLowerCase();let score=0;if(/\.(?:mp4|mov|m4v|webm)(?:\?|$)/i.test(url))score+=120;if(/downloadedvideo|downloadvideo|video_url|videourl|play_url|playurl|download_url|downloadurl/.test(s))score+=100;if(/video/.test(s))score+=70;if(/play|download|stream|media/.test(s))score+=35;if(/watermark|cover|thumb|image|music|audio|sound/.test(s))score-=80;return score;}
+function videoUrlFrom(x){const candidates=collectUrls(x).filter(c=>!isAudioCandidate(c.url,c.path)&&!isImageCandidate(c.url,c.path)).map(c=>({...c,score:videoScore(c)})).filter(c=>c.score>0).sort((a,b)=>b.score-a.score);return candidates[0]?.url||'';}
 function imageUrlFrom(x){return collectUrls(x).find(c=>isImageCandidate(c.url,c.path))?.url||'';}
-function douyinNormalize(raw){
-  const x=raw?.item||raw||{};const stat=x.statistics||x.stats||{};const author=x.author||x.creator||{};
-  const id=String(first(x.awemeId,x.aweme_id,x.videoId,x.id,x.itemId,'')).trim();
-  if(!id)return null;
-  return {
-    externalPostId:id,
-    sourceUrl:first(x.sourceUrl,x.url,x.shareUrl,x.share_url,`https://www.douyin.com/video/${id}`),
-    videoUrl:videoUrlFrom(x),thumbnailUrl:imageUrlFrom(x),
-    caption:String(first(x.desc,x.caption,x.title,x.description,'')),
-    authorId:String(first(author.secUid,author.uid,author.id,x.authorId,'')),authorName:String(first(author.nickname,author.name,x.authorName,'')),
-    publishedAt:first(x.createTime,x.create_time,x.publishedAt,null),
-    views:num(first(stat.playCount,stat.play_count,x.views,x.playCount,0)),likes:num(first(stat.diggCount,stat.likeCount,stat.digg_count,x.likes,x.likeCount,0)),comments:num(first(stat.commentCount,stat.comment_count,x.comments,0)),shares:num(first(stat.shareCount,stat.share_count,x.shares,0)),metadata:raw
-  };
-}
-function xhsSearchNormalize(raw){
-  const outer=raw?.item?raw:{item:raw};const x=outer.item||{};const card=x.note_card||x.noteCard||x.postData||x;
-  const id=String(first(x.id,card.note_id,card.noteId,card.id,'')).trim();if(!id)return null;
-  const user=card.user||{};const interact=card.interact_info||card.interactInfo||{};const xsec=first(card.xsec_token,card.xsecToken,user.xsec_token,user.xsecToken,'');
-  const sourceUrl=first(x.postUrl,card.postUrl,raw?.postUrl,`https://www.xiaohongshu.com/explore/${id}${xsec?`?xsec_token=${encodeURIComponent(xsec)}`:''}`);
-  return {externalPostId:id,sourceUrl,videoUrl:videoUrlFrom(card),thumbnailUrl:imageUrlFrom(card),caption:String(first(card.display_title,card.displayTitle,card.title,x.title,'')),authorId:String(first(user.user_id,user.userId,user.id,'')),authorName:String(first(user.nick_name,user.nickName,user.nickname,user.name,'')),publishedAt:first(card.time,card.timestamp,x.scrapedAt,null),views:num(first(interact.view_count,interact.viewCount,card.views,0)),likes:num(first(interact.liked_count,interact.likedCount,card.likes,0)),comments:num(first(interact.comment_count,interact.commentCount,card.comments,0)),shares:num(first(interact.share_count,interact.shareCount,card.shares,0)),metadata:raw};
-}
-function xhsDownloadedUrl(raw){
-  const result=raw?.result||raw||{};const medias=Array.isArray(result.medias)?result.medias:[];
-  const explicit=medias.find(m=>String(m?.type||'').toLowerCase()==='video'&&/^https?:\/\//i.test(m?.url||'')&&!isAudioCandidate(m.url,'medias.video'))?.url;
-  return explicit||videoUrlFrom(result);
-}
-function instagramNormalize(raw,username){
-  const x=raw?.item||raw||{};const owner=x.owner||x.user||x.author||{};
-  const shortcode=String(first(x.shortCode,x.shortcode,x.code,x.id,x.pk,'')).trim();if(!shortcode)return null;
-  const sourceUrl=first(x.url,x.postUrl,x.reelUrl,x.inputUrl,shortcode?`https://www.instagram.com/reel/${shortcode}/`:null);
-  return {
-    externalPostId:shortcode,
-    sourceUrl,
-    videoUrl:videoUrlFrom(x),
-    thumbnailUrl:imageUrlFrom(x),
-    caption:String(first(x.caption,x.text,x.description,x.title,'')),
-    authorId:String(first(owner.id,owner.pk,x.ownerId,'')),
-    authorName:String(first(owner.username,x.ownerUsername,x.username,username,'')),
-    publishedAt:first(x.timestamp,x.takenAt,x.taken_at,x.publishedAt,null),
-    views:num(first(x.videoPlayCount,x.playCount,x.views,x.videoViewCount,0)),
-    likes:num(first(x.likesCount,x.likeCount,x.likes,0)),
-    comments:num(first(x.commentsCount,x.commentCount,x.comments,0)),
-    shares:num(first(x.sharesCount,x.shareCount,x.shares,0)),
-    metadata:raw
-  };
-}
+function douyinNormalize(raw){const x=raw?.item||raw||{};const stat=x.statistics||x.stats||{};const author=x.author||x.creator||{};const id=String(first(x.awemeId,x.aweme_id,x.videoId,x.id,x.itemId,'')).trim();if(!id)return null;return {externalPostId:id,sourceUrl:first(x.sourceUrl,x.url,x.shareUrl,x.share_url,`https://www.douyin.com/video/${id}`),videoUrl:videoUrlFrom(x),thumbnailUrl:imageUrlFrom(x),caption:String(first(x.desc,x.caption,x.title,x.description,'')),authorId:String(first(author.secUid,author.uid,author.id,x.authorId,'')),authorName:String(first(author.nickname,author.name,x.authorName,'')),publishedAt:first(x.createTime,x.create_time,x.publishedAt,null),views:num(first(stat.playCount,stat.play_count,x.views,x.playCount,0)),likes:num(first(stat.diggCount,stat.likeCount,stat.digg_count,x.likes,x.likeCount,0)),comments:num(first(stat.commentCount,stat.comment_count,x.comments,0)),shares:num(first(stat.shareCount,stat.share_count,x.shares,0)),metadata:raw};}
+function xhsSearchNormalize(raw){const outer=raw?.item?raw:{item:raw};const x=outer.item||{};const card=x.note_card||x.noteCard||x.postData||x;const id=String(first(x.id,card.note_id,card.noteId,card.id,'')).trim();if(!id)return null;const user=card.user||{};const interact=card.interact_info||card.interactInfo||{};const xsec=first(card.xsec_token,card.xsecToken,user.xsec_token,user.xsecToken,'');const sourceUrl=first(x.postUrl,card.postUrl,raw?.postUrl,`https://www.xiaohongshu.com/explore/${id}${xsec?`?xsec_token=${encodeURIComponent(xsec)}`:''}`);return {externalPostId:id,sourceUrl,videoUrl:videoUrlFrom(card),thumbnailUrl:imageUrlFrom(card),caption:String(first(card.display_title,card.displayTitle,card.title,x.title,'')),authorId:String(first(user.user_id,user.userId,user.id,'')),authorName:String(first(user.nick_name,user.nickName,user.nickname,user.name,'')),publishedAt:first(card.time,card.timestamp,x.scrapedAt,null),views:num(first(interact.view_count,interact.viewCount,card.views,0)),likes:num(first(interact.liked_count,interact.likedCount,card.likes,0)),comments:num(first(interact.comment_count,interact.commentCount,card.comments,0)),shares:num(first(interact.share_count,interact.shareCount,card.shares,0)),metadata:raw};}
+function xhsDownloadedUrl(raw){const result=raw?.result||raw||{};const medias=Array.isArray(result.medias)?result.medias:[];const explicit=medias.find(m=>String(m?.type||'').toLowerCase()==='video'&&/^https?:\/\//i.test(m?.url||'')&&!isAudioCandidate(m.url,'medias.video'))?.url;return explicit||videoUrlFrom(result);}
+function instagramNormalize(raw,username){const x=raw?.item||raw||{};const owner=x.owner||x.user||x.author||{};const shortcode=String(first(x.shortCode,x.shortcode,x.code,x.id,x.pk,'')).trim();if(!shortcode)return null;const sourceUrl=first(x.url,x.postUrl,x.reelUrl,x.inputUrl,shortcode?`https://www.instagram.com/reel/${shortcode}/`:null);return {externalPostId:shortcode,sourceUrl,videoUrl:videoUrlFrom(x),thumbnailUrl:imageUrlFrom(x),caption:String(first(x.caption,x.text,x.description,x.title,'')),authorId:String(first(owner.id,owner.pk,x.ownerId,'')),authorName:String(first(owner.username,x.ownerUsername,x.username,username,'')),publishedAt:first(x.timestamp,x.takenAt,x.taken_at,x.publishedAt,null),views:num(first(x.videoPlayCount,x.playCount,x.views,x.videoViewCount,0)),likes:num(first(x.likesCount,x.likeCount,x.likes,0)),comments:num(first(x.commentsCount,x.commentCount,x.comments,0)),shares:num(first(x.sharesCount,x.shareCount,x.shares,0)),metadata:raw};}
 function popularity(x){return Number(x.likes||0)*4+Number(x.comments||0)*3+Number(x.shares||0)*5+Number(x.views||0)*0.02;}
 
-export class ApifyDouyinCollector extends BaseSocialCollector{
-  constructor(){super('DOUYIN');}
-  async discover(target){
-    const keyword=String(target.target_value||'').trim();if(!keyword)return [];
-    const items=await runActor(DOUYIN_ACTOR,{keywords:[keyword],maxResultsPerQuery:10,sort:'most_liked',publishTime:'one_week',duration:'under_1m',shouldDownloadVideos:true});
-    return items.map(douyinNormalize).filter(x=>x?.sourceUrl&&x?.videoUrl);
-  }
-}
-export class ApifyXiaohongshuCollector extends BaseSocialCollector{
-  constructor(){super('XIAOHONGSHU');}
-  async discover(target){
-    const keyword=String(target.target_value||'').trim();if(!keyword)return [];
-    const search=await runActor(XHS_SEARCH_ACTOR,{mode:'search',keywords:[keyword],maxItems:30});
-    const normalized=search.map(xhsSearchNormalize).filter(x=>x?.sourceUrl).sort((a,b)=>popularity(b)-popularity(a)).slice(0,10);
-    const need=normalized.filter(x=>!x.videoUrl).slice(0,10);
-    if(need.length){
-      const downloaded=await runActor(XHS_VIDEO_ACTOR,{links:need.map(x=>x.sourceUrl)});
-      const byUrl=new Map(downloaded.map(x=>[String(x.url||x?.result?.url||''),xhsDownloadedUrl(x)]));
-      for(const x of need)x.videoUrl=byUrl.get(String(x.sourceUrl))||'';
-    }
-    return normalized.filter(x=>x.videoUrl);
-  }
-}
-export class ApifyInstagramCollector extends BaseSocialCollector{
-  constructor(){super('INSTAGRAM');}
-  async discover(target){
-    const username=String(target.target_value||'').replace(/^@/,'').trim();if(!username)return [];
-    const items=await runActor(INSTAGRAM_REELS_ACTOR,{instagramUsernames:[username]},90000);
-    return items.map(x=>instagramNormalize(x,username)).filter(x=>x?.sourceUrl&&x?.videoUrl).sort((a,b)=>popularity(b)-popularity(a)).slice(0,8);
-  }
-}
+export class ApifyDouyinCollector extends BaseSocialCollector{constructor(){super('DOUYIN');}async discover(target){const keyword=String(target.target_value||'').trim();if(!keyword)return [];const items=await runActor(DOUYIN_ACTOR,{keywords:[keyword],maxResultsPerQuery:10,sort:'most_liked',publishTime:'one_week',duration:'under_1m',shouldDownloadVideos:true});return items.map(douyinNormalize).filter(x=>x?.sourceUrl&&x?.videoUrl);}}
+export class ApifyXiaohongshuCollector extends BaseSocialCollector{constructor(){super('XIAOHONGSHU');}async discover(target){const keyword=String(target.target_value||'').trim();if(!keyword)return [];const search=await runActor(XHS_SEARCH_ACTOR,{mode:'search',keywords:[keyword],maxItems:30});const normalized=search.map(xhsSearchNormalize).filter(x=>x?.sourceUrl).sort((a,b)=>popularity(b)-popularity(a)).slice(0,10);const need=normalized.filter(x=>!x.videoUrl).slice(0,10);if(need.length){const downloaded=await runActor(XHS_VIDEO_ACTOR,{links:need.map(x=>x.sourceUrl)});const byUrl=new Map(downloaded.map(x=>[String(x.url||x?.result?.url||''),xhsDownloadedUrl(x)]));for(const x of need)x.videoUrl=byUrl.get(String(x.sourceUrl))||'';}return normalized.filter(x=>x.videoUrl);}}
+export class ApifyInstagramCollector extends BaseSocialCollector{constructor(){super('INSTAGRAM');}async discover(target){const username=String(target.target_value||'').replace(/^@/,'').trim();if(!username)return [];const items=await runActor(INSTAGRAM_REELS_ACTOR,{instagramUsernames:[username]},90000,1);return items.map(x=>instagramNormalize(x,username)).filter(x=>x?.sourceUrl&&x?.videoUrl).sort((a,b)=>popularity(b)-popularity(a)).slice(0,8);}}
