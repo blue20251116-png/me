@@ -9,6 +9,7 @@ import { projectsRouter } from './routes/projects.js';
 import { trendsRouter } from './routes/trends.js';
 import { settingsRouter } from './routes/settings.js';
 import { discoveryRouter } from './routes/discovery.js';
+import { discoveryAutoRouter } from './routes/discoveryAuto.js';
 import { configuredServices } from './lib/settingsStore.js';
 import { startSocialMonitor } from './workers/socialMonitor.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,7 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/trends', trendsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/discovery', discoveryRouter);
+app.use('/api/discovery-auto', discoveryAutoRouter);
 app.use('/storage', express.static(path.join(__dirname, '..', 'storage')));
 app.use('/', express.static(path.join(__dirname, '..', 'admin')));
 function commandAvailable(command){
