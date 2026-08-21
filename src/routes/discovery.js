@@ -22,7 +22,6 @@ function publicFrameUrl(file){
 }
 function thresholdStatus(score){return score>=90?'AUTO_CONFIRMED':score>=70?'REVIEW_REQUIRED':'REJECTED';}
 
-// Monitoring targets
 discoveryRouter.get('/targets',(_req,res)=>res.json({items:db.prepare('SELECT * FROM social_monitor_targets ORDER BY created_at DESC').all()}));
 discoveryRouter.post('/targets',(req,res)=>{
   try{
@@ -39,7 +38,6 @@ discoveryRouter.patch('/targets/:id',(req,res)=>{
   if(!r.changes)return res.status(404).json({error:'not found'});res.json({ok:true});
 });
 
-// Collector adapters can POST normalized discoveries here. This keeps Douyin/XHS access logic replaceable.
 discoveryRouter.post('/ingest',(req,res)=>{
   try{
     const x=req.body||{}; const platform=String(x.platform||'').toUpperCase();
@@ -71,7 +69,7 @@ discoveryRouter.post('/posts/:id/analyze',async(req,res)=>{
   const post=db.prepare('SELECT * FROM social_posts WHERE id=?').get(req.params.id);if(!post)return res.status(404).json({error:'not found'});
   try{
     db.prepare("UPDATE social_posts SET status='DOWNLOADING',error_message=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(post.id);
-    const videoPath=post.local_video_path||await downloadSocialVideo({postId:post.id,url:post.video_url});
+    const videoPath=post.local_video_path||await downloadSocialVideo({postId:post.id,url:post.video_url,platform:post.platform,sourceUrl:post.source_url});
     db.prepare("UPDATE social_posts SET local_video_path=?,status='ANALYZING',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(videoPath,post.id);log(post,'DOWNLOADED');
     db.prepare('DELETE FROM video_frames WHERE post_id=?').run(post.id);
     const frames=extractBestFrames({postId:post.id,videoPath,count:3});
