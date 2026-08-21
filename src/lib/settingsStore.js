@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { db } from '../db/db.js';
+import { db, persistentDataRoot, activeDbPath } from '../db/db.js';
 
-const KEY_FILE=process.env.SETTINGS_KEY_FILE||'./storage/.settings.key';
+const KEY_FILE=process.env.SETTINGS_KEY_FILE||path.join(persistentDataRoot,'.settings.key');
 const ALLOWED=new Set([
   'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','APIFY_API_TOKEN',
   'COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY','COUPANG_SUB_ID',
@@ -12,7 +12,12 @@ const ALLOWED=new Set([
   'PUBLIC_BASE_URL'
 ]);
 
+function envMasterKey(){
+  const raw=String(process.env.SETTINGS_MASTER_KEY||'').trim();
+  return raw?crypto.createHash('sha256').update(raw).digest():null;
+}
 function masterKey(){
+  const envKey=envMasterKey();if(envKey)return envKey;
   fs.mkdirSync(path.dirname(KEY_FILE),{recursive:true});
   if(!fs.existsSync(KEY_FILE))fs.writeFileSync(KEY_FILE,crypto.randomBytes(32),{mode:0o600});
   return fs.readFileSync(KEY_FILE);
@@ -61,6 +66,10 @@ export function hydrateSavedSettings(){
     if(!row)continue;
     try{const value=decrypt(row.value);if(value)process.env[name]=value;}catch{}
   }
+}
+export function settingsPersistenceInfo(){
+  const persistentByEnv=Boolean(process.env.PERSISTENT_DATA_DIR||process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.DB_PATH||process.env.SETTINGS_KEY_FILE||process.env.SETTINGS_MASTER_KEY);
+  return {persistentByEnv,dataRoot:persistentDataRoot,dbPath:activeDbPath,keyFile:envMasterKey()?'ENV:SETTINGS_MASTER_KEY':KEY_FILE};
 }
 export function configuredServices(){
   const apify=!!getSecret('APIFY_API_TOKEN');
