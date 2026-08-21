@@ -12,7 +12,7 @@ function runText(run){
   if(!run)return '';
   if(run.running){
     if(run.stage==='COLLECTING')return '1/2 Apify에서 Douyin·Xiaohongshu 인기 상품영상을 찾는 중입니다';
-    if(run.stage==='ANALYZING')return `2/2 영상 분석·자막 제거·쿠팡 매칭 중 ${Number(run.processed||0)}/${Number(run.queued||0)} · 성공 ${Number(run.succeeded||0)}`;
+    if(run.stage==='ANALYZING')return `2/2 영상 분석·자막 제거·쿠팡 매칭 중 ${Number(run.processed||0)}/${Number(run.queued||0)} · 성공 ${Number(run.succeeded||0)} · 실패 ${Number(run.failed||0)}`;
     return run.message||'자동 작업 진행 중';
   }
   if(run.stage==='DONE')return run.message||'자동 작업 완료';
@@ -25,9 +25,9 @@ async function refreshAutoState({refreshResults=false}={}){
   autoBtn.disabled=false;autoBtn.textContent='🚀 한 번에 전부 자동 실행';
   if(r.stage==='DONE')setAutoStatus(runText(r),'ok');
   else if(r.stage==='FAILED')setAutoStatus(runText(r),'warn');
-  else if(s.services?.apify&&s.services?.serpapi&&s.services?.coupang&&s.services?.publicBaseUrl)setAutoStatus('Apify + SerpApi + 쿠팡 연결 완료 · 버튼 한 번으로 전 과정을 실행할 수 있습니다','ok');
+  else if(s.services?.apify&&s.services?.openai&&s.services?.serpapi&&s.services?.coupang&&s.services?.publicBaseUrl)setAutoStatus('Apify + OpenAI + SerpApi + 쿠팡 연결 완료 · 버튼 한 번으로 전 과정을 실행할 수 있습니다','ok');
   else{
-    const missing=[];if(!s.services?.apify)missing.push('Apify Token');if(!s.services?.serpapi)missing.push('SerpApi');if(!s.services?.coupang)missing.push('쿠팡 API');if(!s.services?.publicBaseUrl)missing.push('Public URL');
+    const missing=[];if(!s.services?.apify)missing.push('Apify Token');if(!s.services?.openai)missing.push('OpenAI API');if(!s.services?.serpapi)missing.push('SerpApi');if(!s.services?.coupang)missing.push('쿠팡 API');if(!s.services?.publicBaseUrl)missing.push('Public URL');
     setAutoStatus(`필수 설정 필요 · ${missing.join(' / ')}`,'warn');
   }
   if(refreshResults){if(typeof window.loadPosts==='function')await window.loadPosts();if(typeof window.loadStats==='function')await window.loadStats();}
