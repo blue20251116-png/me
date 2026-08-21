@@ -1,14 +1,38 @@
+const autoBtn=document.querySelector('#autoDiscover');
 const autoStatus=document.querySelector('#autoStatus');
+let bridgeReady=false;
+let runTimer=null;
 function setAutoStatus(text,type=''){if(!autoStatus)return;autoStatus.textContent=text;autoStatus.className='auto-status'+(type?` ${type}`:'');}
 async function autoApi(url){const r=await fetch(url);const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||`HTTP ${r.status}`);return j}
 async function refreshAutoState({refreshResults=false}={}){
   const s=await autoApi('/api/discovery-auto/status');
-  const missing=[];if(!s.instagramTargets)missing.push('Instagram 벤치마킹 계정');if(!s.services?.openai)missing.push('OpenAI API');if(!s.services?.serpapi)missing.push('SerpApi');if(!s.services?.coupang)missing.push('쿠팡 API');if(!s.services?.publicBaseUrl)missing.push('Public URL');
-  if(missing.length)setAutoStatus(`필수 설정 필요 · ${missing.join(' / ')}`,'warn');
-  else setAutoStatus(`Chrome 브리지 준비 완료 · 벤치마킹 계정 ${s.instagramTargets}개 · 확장프로그램에서 수집 시작을 누르면 전체 후보 중 최대 3개만 분석합니다`,'ok');
+  const missing=[];if(!s.instagramTargets)missing.push('벤치마킹 계정');if(!s.services?.openai)missing.push('OpenAI');if(!s.services?.serpapi)missing.push('SerpApi');if(!s.services?.coupang)missing.push('쿠팡 API');if(!s.services?.publicBaseUrl)missing.push('Public URL');
+  if(missing.length){setAutoStatus(`관리자 설정 필요 · ${missing.join(' / ')}`,'warn');if(autoBtn)autoBtn.disabled=true;}
+  else{if(autoBtn)autoBtn.disabled=false;setAutoStatus(`${bridgeReady?'Chrome Bridge 연결됨 · ':''}벤치마킹 계정 ${s.instagramTargets}개 · 실행 시 전체 후보 중 최대 3개만 분석합니다`,'ok');}
   if(refreshResults){if(typeof window.loadPosts==='function')await window.loadPosts();if(typeof window.loadStats==='function')await window.loadStats();}
   return s;
 }
+window.addEventListener('message',event=>{
+  const msg=event.data||{};if(msg?.source!=='ME_INSTAGRAM_BRIDGE')return;
+  if(msg.type==='READY'){bridgeReady=true;refreshAutoState().catch(()=>{});return;}
+  if(msg.type==='RESULT'){
+    clearTimeout(runTimer);runTimer=null;if(autoBtn){autoBtn.disabled=false;autoBtn.textContent='🚀 Instagram 수집 시작';}
+    const r=msg.result||{};
+    if(!r.ok){setAutoStatus(`수집 실패 · ${r.error||'알 수 없는 오류'}`,'warn');return;}
+    setAutoStatus(`수집 완료 · 계정 ${r.targets||0}개 확인 · 후보 ${r.candidates||0}개 · ME 저장 ${r.selected||0}개 · 자동 분석 진행 중`,'ok');
+    setTimeout(()=>refreshAutoState({refreshResults:true}).catch(()=>{}),2500);
+    setTimeout(()=>refreshAutoState({refreshResults:true}).catch(()=>{}),10000);
+  }
+});
+if(autoBtn){
+  autoBtn.addEventListener('click',async()=>{
+    try{const s=await refreshAutoState();if(!s.instagramTargets||!s.services?.openai||!s.services?.serpapi||!s.services?.coupang||!s.services?.publicBaseUrl)return;
+      autoBtn.disabled=true;autoBtn.textContent='Chrome에서 수집 시작 중…';setAutoStatus('로그인된 Chrome에서 벤치마킹 Instagram 계정을 확인하고 있습니다','ok');
+      window.postMessage({source:'ME_ADMIN',type:'RUN_INSTAGRAM_BRIDGE'},'*');
+      clearTimeout(runTimer);runTimer=setTimeout(()=>{autoBtn.disabled=false;autoBtn.textContent='🚀 Instagram 수집 시작';setAutoStatus('Chrome Bridge 응답이 없습니다 · 관리자 설정에서 확장프로그램 설치 후 chrome://extensions에서 새로고침해 주세요','warn');},5000);
+    }catch(e){autoBtn.disabled=false;autoBtn.textContent='🚀 Instagram 수집 시작';setAutoStatus(e.message,'warn');}
+  });
+}
 window.loadAutoStatus=()=>refreshAutoState();
-refreshAutoState().catch(e=>setAutoStatus(`브리지 상태 확인 실패 · ${e.message}`,'warn'));
-setInterval(()=>refreshAutoState({refreshResults:true}).catch(()=>{}),10000);
+refreshAutoState().catch(e=>setAutoStatus(`상태 확인 실패 · ${e.message}`,'warn'));
+setInterval(()=>refreshAutoState().catch(()=>{}),15000);
