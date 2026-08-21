@@ -1,1 +1,37 @@
-<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Instagram 상품 발굴</title><link rel="stylesheet" href="/style.css"><style>body{padding:18px}.wrap{max-width:1280px;margin:auto}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.cards{display:grid;gap:14px}.card{padding:16px;border:1px solid var(--border);background:var(--surface-2);border-radius:14px}.review-grid{display:grid;grid-template-columns:minmax(280px,.9fr) minmax(360px,1.1fr);gap:16px}.video-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.video-box{background:#0e1117;border-radius:12px;padding:10px}.video-box h4{margin:0 0 8px}.video-box video{width:100%;aspect-ratio:9/16;max-height:520px;background:#000;border-radius:10px}.ai-box,.script-box{padding:12px;border:1px solid var(--border);border-radius:12px;margin-bottom:10px}.match{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:12px;border:1px solid var(--border);border-radius:12px;margin-top:10px}.match.confirmed{outline:2px solid #35c46a}.match img{width:110px;height:110px;object-fit:contain;background:#fff;border-radius:9px}.score{font-weight:700}.affiliate{padding:10px;border-radius:9px;background:var(--surface);word-break:break-all;margin-top:8px}.muted{opacity:.72}.post-title{margin:8px 0}.section-title{margin:0 0 10px}.empty-video{display:flex;align-items:center;justify-content:center;min-height:180px;border:1px dashed var(--border);border-radius:10px;text-align:center;padding:12px}.toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.hero{text-align:center;padding:34px 20px}.hero h2{font-size:27px;margin:0 0 8px}.hero p{max-width:760px;margin:0 auto 18px;line-height:1.7}.run-btn{width:min(520px,100%);padding:18px 22px;font-size:19px}.auto-status{margin:14px auto 0;max-width:760px;padding:12px;border-radius:12px;background:var(--surface-2);line-height:1.5}.auto-status.ok{color:#138a45}.auto-status.warn{color:#b26a00}@media(max-width:900px){.review-grid{grid-template-columns:1fr}.video-grid{grid-template-columns:1fr 1fr}}@media(max-width:620px){.video-grid{grid-template-columns:1fr}}</style></head><body><div class="wrap"><div class="panel"><div class="toolbar"><div><h1>📸 Instagram 상품 발굴</h1><div id="stats" class="row"></div></div><div class="row"><a class="btn-secondary" href="/discovery-admin.html">⚙️ 관리자 설정</a><a class="btn-secondary" href="/">메인으로</a></div></div></div><div class="panel hero"><h2>Instagram Reel 자동 수집</h2><p>등록된 벤치마킹 계정을 Chrome에서 확인하고 상품성 높은 Reel 후보를 수집합니다. 서버에는 최대 3개만 저장되며 이후 인포크·쿠팡 매칭과 대본/영상 분석이 자동으로 이어집니다.</p><button id="autoDiscover" class="btn-primary run-btn">🚀 Instagram 수집 시작</button><div id="autoStatus" class="auto-status">Chrome 브리지 상태를 확인 중입니다</div></div><div class="panel"><div class="toolbar"><h2>자동 처리 결과 / 쿠팡 상품 검수</h2><button id="refresh" class="btn-secondary">새로고침</button></div><div id="posts" class="cards"></div></div></div><script src="/discovery-work.js"></script><script src="/discovery-auto.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Instagram 상품 발굴</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body{padding:18px}.wrap{max-width:1280px;margin:auto}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.cards{display:grid;gap:14px}.card{padding:16px;border:1px solid var(--border);background:var(--surface-2);border-radius:14px}.review-grid{display:grid;grid-template-columns:minmax(280px,.9fr) minmax(360px,1.1fr);gap:16px}.video-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.video-box{background:#0e1117;border-radius:12px;padding:10px}.video-box h4{margin:0 0 8px}.video-box video{width:100%;aspect-ratio:9/16;max-height:520px;background:#000;border-radius:10px}.video-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}.ai-box,.script-box{padding:12px;border:1px solid var(--border);border-radius:12px;margin-bottom:10px}.match{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:12px;border:1px solid var(--border);border-radius:12px;margin-top:10px}.match.confirmed{outline:2px solid #35c46a}.match img{width:110px;height:110px;object-fit:contain;background:#fff;border-radius:9px}.score{font-weight:700}.affiliate{padding:10px;border-radius:9px;background:var(--surface);word-break:break-all;margin-top:8px}.muted{opacity:.72}.post-title{margin:8px 0}.section-title{margin:0 0 10px}.empty-video{display:flex;align-items:center;justify-content:center;min-height:180px;border:1px dashed var(--border);border-radius:10px;text-align:center;padding:12px}.toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.hero{text-align:center;padding:34px 20px}.hero h2{font-size:27px;margin:0 0 8px}.hero p{max-width:760px;margin:0 auto 18px;line-height:1.7}.run-btn{width:min(520px,100%);padding:18px 22px;font-size:19px}.auto-status{margin:14px auto 0;max-width:760px;padding:12px;border-radius:12px;background:var(--surface-2);line-height:1.5}.auto-status.ok{color:#138a45}.auto-status.warn{color:#b26a00}.result-controls{display:flex;gap:8px;flex-wrap:wrap}.count-note{font-size:13px;opacity:.75}@media(max-width:900px){.review-grid{grid-template-columns:1fr}.video-grid{grid-template-columns:1fr 1fr}}@media(max-width:620px){.video-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <div class="toolbar">
+      <div><h1>📸 Instagram 상품 발굴</h1><div id="stats" class="row"></div></div>
+      <div class="row"><a class="btn-secondary" href="/discovery-admin.html">⚙️ 관리자 설정</a><a class="btn-secondary" href="/">메인으로</a></div>
+    </div>
+  </div>
+  <div class="panel hero">
+    <h2>Instagram Reel 자동 수집</h2>
+    <p>등록된 벤치마킹 계정을 Chrome에서 확인하고 상품성 높은 Reel 후보를 수집합니다. 서버에는 최대 3개만 저장되며 이후 인포크·쿠팡 매칭과 대본/영상 분석이 자동으로 이어집니다.</p>
+    <button id="autoDiscover" class="btn-primary run-btn">🚀 Instagram 수집 시작</button>
+    <div id="autoStatus" class="auto-status">Chrome 브리지 상태를 확인 중입니다</div>
+  </div>
+  <div class="panel">
+    <div class="toolbar">
+      <div><h2>처리할 Reel / 쿠팡 상품 검수</h2><div id="resultCount" class="count-note"></div></div>
+      <div class="result-controls"><button id="toggleCompleted" class="btn-secondary">처리완료 보기</button><button id="refresh" class="btn-secondary">새로고침</button></div>
+    </div>
+    <div id="posts" class="cards"></div>
+  </div>
+</div>
+<script src="/discovery-work.js"></script>
+<script src="/discovery-auto.js"></script>
+</body>
+</html>
