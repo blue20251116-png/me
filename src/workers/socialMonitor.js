@@ -16,25 +16,26 @@ function saveDiscovered(target,x){
 
 export async function runSocialMonitorOnce(){
   const targets=db.prepare("SELECT * FROM social_monitor_targets WHERE enabled=1 AND platform='INSTAGRAM' AND target_type='ACCOUNT' ORDER BY last_checked_at IS NOT NULL,last_checked_at ASC").all();
-  let discovered=0;
+  let discovered=0,failedTargets=0;
+  const collector=collectorFor('INSTAGRAM');
   for(const target of targets){
     try{
-      const collector=collectorFor('INSTAGRAM');
       const items=await collector.discover(target);
       for(const item of items)if(saveDiscovered(target,item))discovered++;
       db.prepare('UPDATE social_monitor_targets SET last_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(target.id);
     }catch(err){
-      console.error(`[InstagramMonitor] account=${target.target_value} reason=${String(err?.message||err)}`);
+      failedTargets++;
+      console.error(`[InstagramDirect] account=${target.target_value} failed reason=${String(err?.message||err)}`);
     }
   }
-  return {targets:targets.length,discovered,platform:'INSTAGRAM'};
+  return {targets:targets.length,discovered,failedTargets,platform:'INSTAGRAM',collector:'DIRECT'};
 }
 
 export function startSocialMonitor(){
   const minutes=Number(process.env.SOCIAL_POLL_MINUTES||0);
   if(!Number.isFinite(minutes)||minutes<=0)return null;
   const ms=Math.max(5,minutes)*60_000;
-  const tick=()=>runSocialMonitorOnce().catch(err=>console.error('[InstagramMonitor]',err));
+  const tick=()=>runSocialMonitorOnce().catch(err=>console.error('[InstagramDirect]',err));
   setTimeout(tick,5000);
   const timer=setInterval(tick,ms);timer.unref?.();return timer;
 }

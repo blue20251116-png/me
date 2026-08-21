@@ -27,7 +27,7 @@ async function readLocalBackup(){
   const dec=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(blob.iv)},key,unb64(blob.data));
   return JSON.parse(new TextDecoder().decode(dec));
 }
-function missingRequired(s){const v=s?.services||{};return !s?.pinConfigured||!v.apify||!v.openai||!v.serpapi||!v.coupang||!v.publicBaseUrl;}
+function missingRequired(s){const v=s?.services||{};return !s?.pinConfigured||!v.openai||!v.serpapi||!v.coupang||!v.publicBaseUrl;}
 async function tryAutoRestore(s){
   if(restoreAttempted||!missingRequired(s))return s;restoreAttempted=true;
   const backup=await readLocalBackup().catch(()=>null);if(!backup?.pin||!backup?.keys||!Object.keys(backup.keys).length)return s;
@@ -46,7 +46,7 @@ async function loadConnectionStatus(){
     byId('pinCreateBox')?.classList.toggle('hidden',!!s.pinConfigured);
     byId('connectionForm')?.classList.toggle('hidden',!s.pinConfigured);
     const v=s.services||{};
-    byId('connectionStatus').innerHTML=[statusChip('Apify',v.apify),statusChip('OpenAI',v.openai),statusChip('SerpApi',v.serpapi),statusChip('쿠팡',v.coupang),statusChip('Public URL',v.publicBaseUrl)].join('');
+    byId('connectionStatus').innerHTML=[statusChip('Instagram 직접수집',true),statusChip('OpenAI',v.openai),statusChip('SerpApi',v.serpapi),statusChip('쿠팡',v.coupang),statusChip('Public URL',v.publicBaseUrl)].join('');
     if(byId('publicBaseUrl')&&!byId('publicBaseUrl').value)byId('publicBaseUrl').value=location.origin;
   }catch(e){byId('connectionMsg').textContent=e.message;}
 }
@@ -56,14 +56,14 @@ byId('createAdminPin')?.addEventListener('click',async()=>{
 });
 byId('saveConnections')?.addEventListener('click',async()=>{
   const pin=byId('connectionPin').value.trim();if(!pin)return alert('관리자 PIN을 입력해 주세요');
-  const mapping={APIFY_API_TOKEN:'apifyApiToken',OPENAI_API_KEY:'openaiApiKey',SERPAPI_API_KEY:'serpApiKey',PUBLIC_BASE_URL:'publicBaseUrl',COUPANG_ACCESS_KEY:'coupangAccessKey',COUPANG_SECRET_KEY:'coupangSecretKey',COUPANG_SUB_ID:'coupangSubId'};
+  const mapping={OPENAI_API_KEY:'openaiApiKey',SERPAPI_API_KEY:'serpApiKey',PUBLIC_BASE_URL:'publicBaseUrl',COUPANG_ACCESS_KEY:'coupangAccessKey',COUPANG_SECRET_KEY:'coupangSecretKey',COUPANG_SUB_ID:'coupangSubId'};
   const keys={};for(const [name,id] of Object.entries(mapping)){const v=byId(id)?.value?.trim();if(v)keys[name]=v;}
   if(!Object.keys(keys).length)return alert('저장할 값을 하나 이상 입력해 주세요');
   const btn=byId('saveConnections');btn.disabled=true;byId('connectionMsg').textContent='저장 중…';
   try{
     await settingsApi('/api/settings/keys',{method:'PUT',headers:{'content-type':'application/json','x-admin-pin':pin},body:JSON.stringify({keys})});
     await saveLocalBackup(pin,keys);
-    for(const id of ['apifyApiToken','openaiApiKey','serpApiKey','coupangAccessKey','coupangSecretKey','coupangSubId'])if(byId(id))byId(id).value='';
+    for(const id of ['openaiApiKey','serpApiKey','coupangAccessKey','coupangSecretKey','coupangSubId'])if(byId(id))byId(id).value='';
     byId('publicBaseUrl').value=location.origin;
     byId('connectionMsg').textContent='저장 완료 · 재빌드 후에도 같은 브라우저에서 자동 복구됩니다';
     await loadConnectionStatus();if(typeof window.loadAutoStatus==='function')await window.loadAutoStatus();

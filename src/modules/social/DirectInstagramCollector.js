@@ -1,0 +1,143 @@
+import { BaseSocialCollector } from './BaseSocialCollector.js';
+
+const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const IG_APP_ID='936619743392459';
+
+function num(v){const n=Number(v);return Number.isFinite(n)?n:0;}
+function first(...v){return v.find(x=>x!==undefined&&x!==null&&String(x).trim()!=='');}
+function decodeHtml(s=''){return String(s).replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');}
+function collectUrls(obj,out=[],path='',depth=0){
+  if(depth>10||obj==null)return out;
+  if(typeof obj==='string'){
+    if(/^https?:\/\//i.test(obj))out.push({url:obj,path});
+    return out;
+  }
+  if(Array.isArray(obj)){for(let i=0;i<obj.length;i++)collectUrls(obj[i],out,`${path}[${i}]`,depth+1);return out;}
+  if(typeof obj==='object')for(const [k,v] of Object.entries(obj))collectUrls(v,out,path?`${path}.${k}`:k,depth+1);
+  return out;
+}
+function videoUrlFrom(obj){
+  const scored=collectUrls(obj).map(x=>{
+    const s=`${x.path} ${x.url}`.toLowerCase();let score=0;
+    if(/\.(mp4|m4v|mov)(\?|$)/i.test(x.url))score+=150;
+    if(/video_url|videourl|play_url|playurl|video_versions|clips_metadata/.test(s))score+=120;
+    if(/video|play|stream/.test(s))score+=60;
+    if(/thumbnail|display_url|image|cover|audio|music|profile_pic/.test(s))score-=160;
+    return {...x,score};
+  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+  return scored[0]?.url||'';
+}
+function imageUrlFrom(obj){return collectUrls(obj).find(x=>/thumbnail|display_url|image|cover/i.test(x.path)&&/\.(jpe?g|png|webp)(\?|$)/i.test(x.url))?.url||'';}
+function captionFrom(node){
+  const edge=node?.edge_media_to_caption?.edges?.[0]?.node?.text;
+  return String(first(edge,node?.caption?.text,node?.caption,node?.text,node?.description,'')||'');
+}
+function normalizeNode(node,username){
+  const shortcode=String(first(node?.shortcode,node?.code,node?.shortCode,node?.pk,node?.id,'')||'').trim();
+  if(!shortcode)return null;
+  const sourceUrl=`https://www.instagram.com/reel/${shortcode}/`;
+  const isVideo=Boolean(node?.is_video||node?.isVideo||node?.video_url||node?.videoUrl||node?.video_versions||String(node?.product_type||'').toLowerCase()==='clips');
+  if(!isVideo)return null;
+  return {
+    externalPostId:shortcode,
+    sourceUrl,
+    videoUrl:videoUrlFrom(node),
+    thumbnailUrl:imageUrlFrom(node),
+    caption:captionFrom(node),
+    authorId:String(first(node?.owner?.id,node?.user?.pk,node?.user?.id,'')||''),
+    authorName:String(first(node?.owner?.username,node?.user?.username,username)||username),
+    publishedAt:first(node?.taken_at_timestamp,node?.taken_at,node?.timestamp,null),
+    views:num(first(node?.video_view_count,node?.video_play_count,node?.play_count,node?.view_count,0)),
+    likes:num(first(node?.edge_liked_by?.count,node?.edge_media_preview_like?.count,node?.like_count,0)),
+    comments:num(first(node?.edge_media_to_comment?.count,node?.comment_count,0)),
+    shares:num(first(node?.share_count,0)),
+    metadata:{source:'instagram-direct',raw:node}
+  };
+}
+function uniqById(items){const m=new Map();for(const x of items||[])if(x?.externalPostId&&!m.has(x.externalPostId))m.set(x.externalPostId,x);return [...m.values()];}
+
+async function igFetch(url,{json=true}={}){
+  const r=await fetch(url,{headers:{'user-agent':UA,'accept':json?'*/*':'text/html,application/xhtml+xml','accept-language':'ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6','x-ig-app-id':IG_APP_ID,'x-requested-with':'XMLHttpRequest','referer':'https://www.instagram.com/'},redirect:'follow',signal:AbortSignal.timeout(20000)});
+  const text=await r.text();
+  if(!r.ok)throw new Error(`Instagram 직접 수집 HTTP ${r.status}: ${text.slice(0,240)}`);
+  if(!json)return text;
+  try{return JSON.parse(text||'{}');}catch{throw new Error('Instagram 직접 수집 응답이 JSON이 아닙니다. 로그인/차단 페이지일 수 있습니다.');}
+}
+
+async function profileApi(username){
+  const u=new URL('https://www.instagram.com/api/v1/users/web_profile_info/');u.searchParams.set('username',username);
+  const data=await igFetch(u.toString());
+  const user=data?.data?.user||data?.user||{};
+  const buckets=[
+    user?.edge_felix_video_timeline?.edges,
+    user?.edge_owner_to_timeline_media?.edges,
+    user?.edge_clips_grid?.edges,
+    user?.clips?.edges,
+    user?.reels?.edges
+  ];
+  const out=[];
+  for(const bucket of buckets){for(const e of bucket||[]){const n=e?.node||e?.media||e;const x=normalizeNode(n,username);if(x)out.push(x);}}
+  return {items:uniqById(out),userId:String(first(user?.id,user?.pk,'')||''),raw:user};
+}
+
+async function clipsApi(userId,username){
+  if(!userId)return [];
+  const endpoints=[
+    `https://www.instagram.com/api/v1/clips/user/?target_user_id=${encodeURIComponent(userId)}&page_size=12`,
+    `https://www.instagram.com/api/v1/feed/user/${encodeURIComponent(userId)}/?count=12`
+  ];
+  for(const url of endpoints){
+    try{
+      const data=await igFetch(url);const raw=[...(data?.items||[]),...(data?.data?.items||[])];
+      const items=raw.map(x=>normalizeNode(x?.media||x?.item||x,username)).filter(Boolean);
+      if(items.length)return uniqById(items);
+    }catch{}
+  }
+  return [];
+}
+
+function extractMeta(html,name){const re=new RegExp(`<meta[^>]+(?:property|name)=["']${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}["'][^>]+content=["']([^"']+)["']`,'i');return decodeHtml(html.match(re)?.[1]||'');}
+function shortcodesFromHtml(html){const found=[];for(const m of html.matchAll(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]{5,})\/?/g))found.push(m[1]);return [...new Set(found)];}
+async function hydrateFromReelPage(shortcode,username){
+  try{
+    const html=await igFetch(`https://www.instagram.com/reel/${encodeURIComponent(shortcode)}/`,{json:false});
+    const video=first(extractMeta(html,'og:video:secure_url'),extractMeta(html,'og:video'),extractMeta(html,'twitter:player:stream'))||'';
+    const image=first(extractMeta(html,'og:image'),extractMeta(html,'twitter:image'))||'';
+    const description=first(extractMeta(html,'og:description'),extractMeta(html,'description'))||'';
+    return {externalPostId:shortcode,sourceUrl:`https://www.instagram.com/reel/${shortcode}/`,videoUrl:video,thumbnailUrl:image,caption:description,authorId:'',authorName:username,publishedAt:null,views:0,likes:0,comments:0,shares:0,metadata:{source:'instagram-direct-html'}};
+  }catch{return null;}
+}
+async function profileHtmlFallback(username){
+  const html=await igFetch(`https://www.instagram.com/${encodeURIComponent(username)}/`,{json:false});
+  const codes=shortcodesFromHtml(html).slice(0,12);const out=[];
+  for(const code of codes){const x=await hydrateFromReelPage(code,username);if(x?.videoUrl)out.push(x);if(out.length>=8)break;}
+  return out;
+}
+
+export class DirectInstagramCollector extends BaseSocialCollector{
+  constructor(){super('INSTAGRAM');}
+  async discover(target){
+    const username=String(target?.target_value||'').replace(/^@/,'').trim();if(!username)return [];
+    console.log(`[InstagramDirect] collect start account=${username}`);
+    let profile={items:[],userId:''};
+    try{profile=await profileApi(username);}catch(err){console.warn(`[InstagramDirect] profile-api failed account=${username} reason=${String(err?.message||err)}`);}
+    let items=[...(profile.items||[])];
+    if(items.filter(x=>x.videoUrl).length<3){
+      try{items=uniqById([...items,...await clipsApi(profile.userId,username)]);}catch{}
+    }
+    // Hydrate missing direct video URLs from each public Reel page.
+    const hydrated=[];
+    for(const x of items.slice(0,12)){
+      if(x.videoUrl){hydrated.push(x);continue;}
+      const h=await hydrateFromReelPage(x.externalPostId,username);if(h?.videoUrl)hydrated.push({...x,...h,caption:x.caption||h.caption,metadata:{...x.metadata,...h.metadata}});
+      if(hydrated.length>=8)break;
+    }
+    if(!hydrated.length){
+      try{hydrated.push(...await profileHtmlFallback(username));}catch(err){console.warn(`[InstagramDirect] html fallback failed account=${username} reason=${String(err?.message||err)}`);}
+    }
+    const result=uniqById(hydrated).filter(x=>x.sourceUrl&&x.videoUrl).slice(0,8);
+    console.log(`[InstagramDirect] collect done account=${username} reels=${result.length}`);
+    if(!result.length)throw new Error('공개 Reel 영상 URL을 찾지 못했습니다. Instagram이 비로그인 접근을 제한했을 수 있습니다.');
+    return result;
+  }
+}
