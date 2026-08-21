@@ -2,6 +2,7 @@ import { BaseSocialCollector } from './BaseSocialCollector.js';
 
 const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const IG_APP_ID='936619743392459';
+const MAX_REELS_PER_ACCOUNT=3;
 
 function num(v){const n=Number(v);return Number.isFinite(n)?n:0;}
 function first(...v){return v.find(x=>x!==undefined&&x!==null&&String(x).trim()!=='');}
@@ -55,6 +56,14 @@ function normalizeNode(node,username){
   };
 }
 function uniqById(items){const m=new Map();for(const x of items||[])if(x?.externalPostId&&!m.has(x.externalPostId))m.set(x.externalPostId,x);return [...m.values()];}
+function productCueScore(caption=''){
+  const s=String(caption||'').toLowerCase();let score=0;
+  if(/프로필|링크|인포크|구매|제품|상품|공구|추천|쿠팡/.test(s))score+=5000;
+  if(/댓글|검색|궁금|정보|템|꿀템|살림|주방|수납|생활|차량|육아|반려/.test(s))score+=2500;
+  return score;
+}
+function reelScore(x){return productCueScore(x.caption)+num(x.views)*0.02+num(x.likes)*4+num(x.comments)*3+num(x.shares)*5;}
+function topReels(items){return uniqById(items).filter(x=>x?.sourceUrl&&x?.videoUrl).sort((a,b)=>reelScore(b)-reelScore(a)).slice(0,MAX_REELS_PER_ACCOUNT);}
 
 async function igFetch(url,{json=true}={}){
   const r=await fetch(url,{headers:{'user-agent':UA,'accept':json?'*/*':'text/html,application/xhtml+xml','accept-language':'ko-KR,ko;q=0.9,en-US;q=0.7,en;q=0.6','x-ig-app-id':IG_APP_ID,'x-requested-with':'XMLHttpRequest','referer':'https://www.instagram.com/'},redirect:'follow',signal:AbortSignal.timeout(20000)});
@@ -68,34 +77,17 @@ async function profileApi(username){
   const u=new URL('https://www.instagram.com/api/v1/users/web_profile_info/');u.searchParams.set('username',username);
   const data=await igFetch(u.toString());
   const user=data?.data?.user||data?.user||{};
-  const buckets=[
-    user?.edge_felix_video_timeline?.edges,
-    user?.edge_owner_to_timeline_media?.edges,
-    user?.edge_clips_grid?.edges,
-    user?.clips?.edges,
-    user?.reels?.edges
-  ];
+  const buckets=[user?.edge_felix_video_timeline?.edges,user?.edge_owner_to_timeline_media?.edges,user?.edge_clips_grid?.edges,user?.clips?.edges,user?.reels?.edges];
   const out=[];
   for(const bucket of buckets){for(const e of bucket||[]){const n=e?.node||e?.media||e;const x=normalizeNode(n,username);if(x)out.push(x);}}
   return {items:uniqById(out),userId:String(first(user?.id,user?.pk,'')||''),raw:user};
 }
-
 async function clipsApi(userId,username){
   if(!userId)return [];
-  const endpoints=[
-    `https://www.instagram.com/api/v1/clips/user/?target_user_id=${encodeURIComponent(userId)}&page_size=12`,
-    `https://www.instagram.com/api/v1/feed/user/${encodeURIComponent(userId)}/?count=12`
-  ];
-  for(const url of endpoints){
-    try{
-      const data=await igFetch(url);const raw=[...(data?.items||[]),...(data?.data?.items||[])];
-      const items=raw.map(x=>normalizeNode(x?.media||x?.item||x,username)).filter(Boolean);
-      if(items.length)return uniqById(items);
-    }catch{}
-  }
+  const endpoints=[`https://www.instagram.com/api/v1/clips/user/?target_user_id=${encodeURIComponent(userId)}&page_size=12`,`https://www.instagram.com/api/v1/feed/user/${encodeURIComponent(userId)}/?count=12`];
+  for(const url of endpoints){try{const data=await igFetch(url);const raw=[...(data?.items||[]),...(data?.data?.items||[])];const items=raw.map(x=>normalizeNode(x?.media||x?.item||x,username)).filter(Boolean);if(items.length)return uniqById(items);}catch{}}
   return [];
 }
-
 function extractMeta(html,name){const re=new RegExp(`<meta[^>]+(?:property|name)=["']${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}["'][^>]+content=["']([^"']+)["']`,'i');return decodeHtml(html.match(re)?.[1]||'');}
 function shortcodesFromHtml(html){const found=[];for(const m of html.matchAll(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]{5,})\/?/g))found.push(m[1]);return [...new Set(found)];}
 async function hydrateFromReelPage(shortcode,username){
@@ -110,7 +102,7 @@ async function hydrateFromReelPage(shortcode,username){
 async function profileHtmlFallback(username){
   const html=await igFetch(`https://www.instagram.com/${encodeURIComponent(username)}/`,{json:false});
   const codes=shortcodesFromHtml(html).slice(0,12);const out=[];
-  for(const code of codes){const x=await hydrateFromReelPage(code,username);if(x?.videoUrl)out.push(x);if(out.length>=8)break;}
+  for(const code of codes){const x=await hydrateFromReelPage(code,username);if(x?.videoUrl)out.push(x);if(out.length>=6)break;}
   return out;
 }
 
@@ -122,21 +114,15 @@ export class DirectInstagramCollector extends BaseSocialCollector{
     let profile={items:[],userId:''};
     try{profile=await profileApi(username);}catch(err){console.warn(`[InstagramDirect] profile-api failed account=${username} reason=${String(err?.message||err)}`);}
     let items=[...(profile.items||[])];
-    if(items.filter(x=>x.videoUrl).length<3){
-      try{items=uniqById([...items,...await clipsApi(profile.userId,username)]);}catch{}
-    }
-    // Hydrate missing direct video URLs from each public Reel page.
+    try{items=uniqById([...items,...await clipsApi(profile.userId,username)]);}catch{}
     const hydrated=[];
     for(const x of items.slice(0,12)){
       if(x.videoUrl){hydrated.push(x);continue;}
       const h=await hydrateFromReelPage(x.externalPostId,username);if(h?.videoUrl)hydrated.push({...x,...h,caption:x.caption||h.caption,metadata:{...x.metadata,...h.metadata}});
-      if(hydrated.length>=8)break;
     }
-    if(!hydrated.length){
-      try{hydrated.push(...await profileHtmlFallback(username));}catch(err){console.warn(`[InstagramDirect] html fallback failed account=${username} reason=${String(err?.message||err)}`);}
-    }
-    const result=uniqById(hydrated).filter(x=>x.sourceUrl&&x.videoUrl).slice(0,8);
-    console.log(`[InstagramDirect] collect done account=${username} reels=${result.length}`);
+    if(!hydrated.length){try{hydrated.push(...await profileHtmlFallback(username));}catch(err){console.warn(`[InstagramDirect] html fallback failed account=${username} reason=${String(err?.message||err)}`);}}
+    const result=topReels(hydrated);
+    console.log(`[InstagramDirect] collect done account=${username} selected=${result.length} candidates=${hydrated.length}`);
     if(!result.length)throw new Error('공개 Reel 영상 URL을 찾지 못했습니다. Instagram이 비로그인 접근을 제한했을 수 있습니다.');
     return result;
   }
