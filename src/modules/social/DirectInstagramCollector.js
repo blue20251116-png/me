@@ -7,6 +7,7 @@ const MAX_REELS_PER_ACCOUNT=3;
 function num(v){const n=Number(v);return Number.isFinite(n)?n:0;}
 function first(...v){return v.find(x=>x!==undefined&&x!==null&&String(x).trim()!=='');}
 function decodeHtml(s=''){return String(s).replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');}
+function unescapeJsonUrl(s=''){return decodeHtml(String(s||'')).replace(/\\u0026/g,'&').replace(/\\\//g,'/').replace(/\\u003d/g,'=').replace(/\\u0025/g,'%');}
 function collectUrls(obj,out=[],path='',depth=0){
   if(depth>10||obj==null)return out;
   if(typeof obj==='string'){
@@ -80,29 +81,57 @@ async function profileApi(username){
   const buckets=[user?.edge_felix_video_timeline?.edges,user?.edge_owner_to_timeline_media?.edges,user?.edge_clips_grid?.edges,user?.clips?.edges,user?.reels?.edges];
   const out=[];
   for(const bucket of buckets){for(const e of bucket||[]){const n=e?.node||e?.media||e;const x=normalizeNode(n,username);if(x)out.push(x);}}
+  console.log(`[InstagramDirect] profile-api account=${username} userId=${String(first(user?.id,user?.pk,'')||'-')} reelCandidates=${out.length} withVideo=${out.filter(x=>x.videoUrl).length}`);
   return {items:uniqById(out),userId:String(first(user?.id,user?.pk,'')||''),raw:user};
 }
 async function clipsApi(userId,username){
   if(!userId)return [];
   const endpoints=[`https://www.instagram.com/api/v1/clips/user/?target_user_id=${encodeURIComponent(userId)}&page_size=12`,`https://www.instagram.com/api/v1/feed/user/${encodeURIComponent(userId)}/?count=12`];
-  for(const url of endpoints){try{const data=await igFetch(url);const raw=[...(data?.items||[]),...(data?.data?.items||[])];const items=raw.map(x=>normalizeNode(x?.media||x?.item||x,username)).filter(Boolean);if(items.length)return uniqById(items);}catch{}}
+  for(const url of endpoints){
+    try{
+      const data=await igFetch(url);const raw=[...(data?.items||[]),...(data?.data?.items||[])];const items=raw.map(x=>normalizeNode(x?.media||x?.item||x,username)).filter(Boolean);
+      console.log(`[InstagramDirect] clips-api account=${username} endpoint=${new URL(url).pathname} candidates=${items.length} withVideo=${items.filter(x=>x.videoUrl).length}`);
+      if(items.length)return uniqById(items);
+    }catch(err){console.warn(`[InstagramDirect] clips-api failed account=${username} reason=${String(err?.message||err)}`);}
+  }
   return [];
 }
 function extractMeta(html,name){const re=new RegExp(`<meta[^>]+(?:property|name)=["']${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}["'][^>]+content=["']([^"']+)["']`,'i');return decodeHtml(html.match(re)?.[1]||'');}
 function shortcodesFromHtml(html){const found=[];for(const m of html.matchAll(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]{5,})\/?/g))found.push(m[1]);return [...new Set(found)];}
+function embeddedVideoUrls(html){
+  const found=[];
+  const patterns=[
+    /"video_url"\s*:\s*"([^"]+)"/g,
+    /"videoUrl"\s*:\s*"([^"]+)"/g,
+    /"contentUrl"\s*:\s*"([^"]+)"/g,
+    /"playable_url"\s*:\s*"([^"]+)"/g,
+    /"src"\s*:\s*"(https?:\\\/\\\/[^"]+\.mp4[^"]*)"/g
+  ];
+  for(const re of patterns){for(const m of html.matchAll(re)){const u=unescapeJsonUrl(m[1]);if(/^https?:\/\//i.test(u)&&!found.includes(u))found.push(u);}}
+  return found;
+}
+function jsonLdVideo(html){
+  for(const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){
+    try{const j=JSON.parse(decodeHtml(m[1]));const urls=collectUrls(j).filter(x=>/contentUrl|embedUrl|video/i.test(x.path)).map(x=>x.url);if(urls.length)return urls[0];}catch{}
+  }
+  return '';
+}
 async function hydrateFromReelPage(shortcode,username){
   try{
     const html=await igFetch(`https://www.instagram.com/reel/${encodeURIComponent(shortcode)}/`,{json:false});
-    const video=first(extractMeta(html,'og:video:secure_url'),extractMeta(html,'og:video'),extractMeta(html,'twitter:player:stream'))||'';
+    const metaVideo=first(extractMeta(html,'og:video:secure_url'),extractMeta(html,'og:video'),extractMeta(html,'twitter:player:stream'))||'';
+    const embedded=embeddedVideoUrls(html);
+    const video=first(metaVideo,jsonLdVideo(html),embedded[0])||'';
     const image=first(extractMeta(html,'og:image'),extractMeta(html,'twitter:image'))||'';
     const description=first(extractMeta(html,'og:description'),extractMeta(html,'description'))||'';
-    return {externalPostId:shortcode,sourceUrl:`https://www.instagram.com/reel/${shortcode}/`,videoUrl:video,thumbnailUrl:image,caption:description,authorId:'',authorName:username,publishedAt:null,views:0,likes:0,comments:0,shares:0,metadata:{source:'instagram-direct-html'}};
-  }catch{return null;}
+    console.log(`[InstagramDirect] reel-page account=${username} code=${shortcode} html=${html.length} metaVideo=${metaVideo?'yes':'no'} embeddedVideos=${embedded.length} finalVideo=${video?'yes':'no'}`);
+    return {externalPostId:shortcode,sourceUrl:`https://www.instagram.com/reel/${shortcode}/`,videoUrl:video,thumbnailUrl:image,caption:description,authorId:'',authorName:username,publishedAt:null,views:0,likes:0,comments:0,shares:0,metadata:{source:'instagram-direct-html',videoSource:metaVideo?'meta':embedded.length?'embedded':'none'}};
+  }catch(err){console.warn(`[InstagramDirect] reel-page failed account=${username} code=${shortcode} reason=${String(err?.message||err)}`);return null;}
 }
 async function profileHtmlFallback(username){
   const html=await igFetch(`https://www.instagram.com/${encodeURIComponent(username)}/`,{json:false});
-  const codes=shortcodesFromHtml(html).slice(0,12);const out=[];
-  for(const code of codes){const x=await hydrateFromReelPage(code,username);if(x?.videoUrl)out.push(x);if(out.length>=6)break;}
+  const codes=shortcodesFromHtml(html).slice(0,12);console.log(`[InstagramDirect] profile-html account=${username} shortcodes=${codes.length} html=${html.length}`);const out=[];
+  for(const code of codes){const x=await hydrateFromReelPage(code,username);if(x?.videoUrl)out.push(x);}
   return out;
 }
 
@@ -115,6 +144,7 @@ export class DirectInstagramCollector extends BaseSocialCollector{
     try{profile=await profileApi(username);}catch(err){console.warn(`[InstagramDirect] profile-api failed account=${username} reason=${String(err?.message||err)}`);}
     let items=[...(profile.items||[])];
     try{items=uniqById([...items,...await clipsApi(profile.userId,username)]);}catch{}
+    console.log(`[InstagramDirect] merged account=${username} candidates=${items.length} withVideo=${items.filter(x=>x.videoUrl).length}`);
     const hydrated=[];
     for(const x of items.slice(0,12)){
       if(x.videoUrl){hydrated.push(x);continue;}
@@ -122,8 +152,8 @@ export class DirectInstagramCollector extends BaseSocialCollector{
     }
     if(!hydrated.length){try{hydrated.push(...await profileHtmlFallback(username));}catch(err){console.warn(`[InstagramDirect] html fallback failed account=${username} reason=${String(err?.message||err)}`);}}
     const result=topReels(hydrated);
-    console.log(`[InstagramDirect] collect done account=${username} selected=${result.length} candidates=${hydrated.length}`);
-    if(!result.length)throw new Error('공개 Reel 영상 URL을 찾지 못했습니다. Instagram이 비로그인 접근을 제한했을 수 있습니다.');
+    console.log(`[InstagramDirect] collect done account=${username} selected=${result.length} hydrated=${hydrated.length} candidates=${items.length}`);
+    if(!result.length)throw new Error('공개 Reel은 찾았지만 실제 영상 URL을 확보하지 못했습니다. Instagram 비로그인 응답 제한 여부를 로그에서 확인해 주세요.');
     return result;
   }
 }
