@@ -7,7 +7,7 @@ settingsRouter.put('/keys',(req,res)=>{
   try{
     const pin=req.header('x-admin-pin')||req.body?.pin;if(!verifyAdminPin(pin))return res.status(401).json({error:'관리자 PIN이 올바르지 않습니다.'});
     const keys=req.body?.keys||{};
-    for(const name of ['OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY']) if(Object.prototype.hasOwnProperty.call(keys,name)) setSecret(name,String(keys[name]||'').trim());
+    for(const name of ['OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY']) if(Object.prototype.hasOwnProperty.call(keys,name)) setSecret(name,String(keys[name]||'').trim());
     res.json({ok:true,services:configuredServices()});
   }catch(err){res.status(400).json({error:String(err.message||err)});}
 });
