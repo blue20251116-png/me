@@ -64,8 +64,21 @@ async function runBridge(baseUrl,pin){
 }
 
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
-  if(msg?.type!=='RUN_BRIDGE')return;
-  runBridge(String(msg.baseUrl||'').replace(/\/$/,''),String(msg.pin||''))
-    .then(sendResponse).catch(err=>sendResponse({ok:false,error:String(err?.message||err)}));
-  return true;
+  if(msg?.type==='RUN_BRIDGE'){
+    runBridge(String(msg.baseUrl||'').replace(/\/$/,''),String(msg.pin||''))
+      .then(sendResponse).catch(err=>sendResponse({ok:false,error:String(err?.message||err)}));
+    return true;
+  }
+  if(msg?.type==='RUN_BRIDGE_FROM_ADMIN'){
+    (async()=>{
+      const saved=await chrome.storage.local.get(['baseUrl','pin']);
+      const pageBase=String(msg.baseUrl||'').replace(/\/$/,'');
+      const baseUrl=String(saved.baseUrl||pageBase).replace(/\/$/,'');
+      const pin=String(saved.pin||'');
+      if(!pin)throw new Error('Chrome Bridge 관리자 PIN이 저장되지 않았습니다. 확장프로그램에서 한 번만 설정해 주세요.');
+      if(saved.baseUrl&&pageBase&&baseUrl!==pageBase)throw new Error('Chrome Bridge의 ME 서버 주소가 현재 관리자 페이지와 다릅니다. 확장프로그램 설정을 확인해 주세요.');
+      return runBridge(baseUrl,pin);
+    })().then(sendResponse).catch(err=>sendResponse({ok:false,error:String(err?.message||err)}));
+    return true;
+  }
 });
