@@ -45,13 +45,22 @@ export function verifyAdminPin(pin){
 }
 export function setSecret(name,value){
   if(!ALLOWED.has(name)) throw new Error('지원하지 않는 설정입니다.');
-  if(!value){db.prepare('DELETE FROM app_settings WHERE key=?').run(name);return;}
+  if(!value){db.prepare('DELETE FROM app_settings WHERE key=?').run(name);if(!process.env[name])delete process.env[name];return;}
   db.prepare('INSERT OR REPLACE INTO app_settings(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)').run(name,encrypt(value));
+  if(!process.env[name])process.env[name]=String(value);
 }
 export function getSecret(name){
   if(process.env[name])return process.env[name];
   const row=db.prepare('SELECT value FROM app_settings WHERE key=?').get(name);if(!row)return '';
   try{return decrypt(row.value)}catch{return '';}
+}
+export function hydrateSavedSettings(){
+  for(const name of ALLOWED){
+    if(process.env[name])continue;
+    const row=db.prepare('SELECT value FROM app_settings WHERE key=?').get(name);
+    if(!row)continue;
+    try{const value=decrypt(row.value);if(value)process.env[name]=value;}catch{}
+  }
 }
 export function configuredServices(){return {
   openai:!!getSecret('OPENAI_API_KEY'),
