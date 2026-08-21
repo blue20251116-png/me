@@ -1,11 +1,16 @@
 import express from 'express';
+import path from 'node:path';
+import fs from 'node:fs';
 import { db } from '../db/db.js';
 import { newId } from '../lib/util.js';
-import { verifyAdminPin } from '../lib/settingsStore.js';
+import { verifyAdminPin, getSecret } from '../lib/settingsStore.js';
 
 export const browserBridgeRouter=express.Router();
 const MAX_PER_RUN=3;
 const state={running:false,received:0,selected:0,processed:0,succeeded:0,failed:0,lastError:null,startedAt:null,finishedAt:null};
+const storageRoot=path.resolve(process.env.STORAGE_ROOT||'./storage');
+const bridgeDir=path.join(storageRoot,'bridge');
+fs.mkdirSync(bridgeDir,{recursive:true});
 
 function auth(req,res,next){
   const pin=req.header('x-admin-pin')||'';
@@ -36,6 +41,7 @@ function save(x){
   return id;
 }
 function localBase(){return `http://127.0.0.1:${process.env.PORT||4100}`;}
+function publicBase(req){return String(getSecret('PUBLIC_BASE_URL')||process.env.PUBLIC_BASE_URL||`${req.protocol}://${req.get('host')}`).replace(/\/$/,'');}
 async function analyze(id){
   const r=await fetch(`${localBase()}/api/discovery/posts/${encodeURIComponent(id)}/analyze`,{method:'POST',headers:{'content-type':'application/json'},body:'{}',signal:AbortSignal.timeout(180000)});
   const text=await r.text();if(!r.ok)throw new Error(text||`분석 실패 (${r.status})`);
@@ -58,16 +64,30 @@ browserBridgeRouter.get('/targets',auth,(_req,res)=>{
 
 browserBridgeRouter.get('/status',auth,(_req,res)=>res.json({ok:true,maxPerRun:MAX_PER_RUN,state:{...state}}));
 
+browserBridgeRouter.post('/upload-video/:externalPostId',auth,express.raw({type:['application/octet-stream','video/*'],limit:'100mb'}),(req,res)=>{
+  try{
+    const externalPostId=String(req.params.externalPostId||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,100);
+    if(!externalPostId)return res.status(400).json({error:'Reel ID가 필요합니다.'});
+    if(!Buffer.isBuffer(req.body)||req.body.length<1024)return res.status(400).json({error:'영상 데이터가 비어 있습니다.'});
+    const file=`${externalPostId}.mp4`;const target=path.join(bridgeDir,file);
+    fs.writeFileSync(target,req.body);
+    const url=`${publicBase(req)}/storage/bridge/${encodeURIComponent(file)}`;
+    console.log(`[BrowserBridge] video mirrored reel=${externalPostId} bytes=${req.body.length}`);
+    res.json({ok:true,url,bytes:req.body.length});
+  }catch(err){res.status(500).json({error:String(err?.message||err)});}
+});
+
 browserBridgeRouter.post('/submit',auth,(req,res)=>{
   try{
     const input=Array.isArray(req.body?.candidates)?req.body.candidates:[];state.received=input.length;
+    const diag=req.body?.diagnostics&&typeof req.body.diagnostics==='object'?req.body.diagnostics:{};
     const clean=[];const seen=new Set();
     for(const raw of input){const x=normalize(raw);if(!x.externalPostId||!x.sourceUrl||!x.videoUrl||!x.username||seen.has(x.externalPostId)||exists(x.externalPostId))continue;seen.add(x.externalPostId);clean.push(x);}
     clean.sort((a,b)=>score(b)-score(a));
     const selected=clean.slice(0,MAX_PER_RUN);state.selected=selected.length;
     const ids=[];for(const x of selected){const id=save(x);if(id)ids.push(id);}
-    console.log(`[BrowserBridge] submit received=${input.length} eligible=${clean.length} selected=${ids.length} max=${MAX_PER_RUN}`);
+    console.log(`[BrowserBridge] submit received=${input.length} eligible=${clean.length} selected=${ids.length} max=${MAX_PER_RUN} accounts=${num(diag.accountsChecked)} links=${num(diag.linksFound)} details=${num(diag.detailsTried)} videoUrl=${num(diag.videoUrlFound)} mirrored=${num(diag.mirrored)} mirrorFailed=${num(diag.mirrorFailed)}`);
     if(ids.length)setImmediate(()=>processPosts(ids));
-    res.status(202).json({ok:true,received:input.length,eligible:clean.length,selected:ids.length,postIds:ids,message:ids.length?`상품 Reel ${ids.length}개를 저장했고 자동 분석을 시작했습니다`:'새로 저장할 Reel이 없습니다'});
+    res.status(202).json({ok:true,received:input.length,eligible:clean.length,selected:ids.length,postIds:ids,diagnostics:diag,message:ids.length?`상품 Reel ${ids.length}개를 저장했고 자동 분석을 시작했습니다`:'새로 저장할 Reel이 없습니다'});
   }catch(err){res.status(400).json({error:String(err?.message||err)});}
 });

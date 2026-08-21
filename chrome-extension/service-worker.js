@@ -40,33 +40,61 @@ function productLinkScore(x){
 async function collectDetail(tabId,username,sourceUrl,seedText=''){
   const [{result}]=await chrome.scripting.executeScript({target:{tabId},args:[username,sourceUrl,seedText],func:async(username,sourceUrl,seedText)=>{
     const wait=ms=>new Promise(r=>setTimeout(r,ms));
-    for(let i=0;i<8;i++){const v=document.querySelector('video');if(v?.currentSrc||v?.src)break;await wait(350);}
+    for(let i=0;i<9;i++){
+      const v=document.querySelector('video');const src=v?.currentSrc||v?.src||v?.querySelector('source')?.src;
+      if(src&&src!=='about:blank')break;await wait(350);
+    }
     const v=document.querySelector('video');
     const meta=name=>document.querySelector(`meta[property="${name}"],meta[name="${name}"]`)?.content||'';
     const article=document.querySelector('article');
     const pageText=(article?.innerText||document.body?.innerText||'').trim();
     const caption=(meta('og:description')||pageText||seedText||'').slice(0,5000);
     const html=document.documentElement?.innerHTML||'';
-    const embedded=(html.match(/"video_url"\s*:\s*"(https:[^"]+)"/)||[])[1]||'';
-    const unescapeUrl=s=>String(s||'').replace(/\\u0026/g,'&').replace(/\\\//g,'/');
-    const rawVideo=v?.currentSrc||v?.src||meta('og:video:secure_url')||meta('og:video')||unescapeUrl(embedded)||'';
+    const unescapeUrl=s=>String(s||'').replace(/\\u0026/g,'&').replace(/\\u0025/g,'%').replace(/\\\//g,'/').replace(/&amp;/g,'&');
+    const embeddedCandidates=[];
+    for(const re of [/"video_url"\s*:\s*"(https:[^"]+)"/g,/"url"\s*:\s*"(https:[^"]+(?:cdninstagram|fbcdn)[^"]*)"/g]){let m,guard=0;while((m=re.exec(html))&&guard++<30)embeddedCandidates.push(unescapeUrl(m[1]));}
+    const performanceCandidates=(performance.getEntriesByType('resource')||[]).map(x=>String(x.name||'')).filter(x=>/^https:\/\//.test(x)&&/(cdninstagram|fbcdn)/i.test(x)&&/(video|\.mp4|bytestart|byteend|oe=)/i.test(x));
+    const domSrc=v?.currentSrc||v?.src||v?.querySelector('source')?.src||'';
+    const candidates=[domSrc,meta('og:video:secure_url'),meta('og:video'),...embeddedCandidates,...performanceCandidates].map(unescapeUrl).filter(x=>/^https?:\/\//i.test(x));
+    const videoUrl=candidates[0]||'';
     const m=sourceUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
-    return {username,sourceUrl,externalPostId:m?.[1]||'',videoUrl:/^https?:\/\//i.test(rawVideo)?rawVideo:'',thumbnailUrl:v?.poster||meta('og:image')||'',caption,pageText:pageText.slice(0,5000)};
+    return {username,sourceUrl,externalPostId:m?.[1]||'',videoUrl,thumbnailUrl:v?.poster||meta('og:image')||'',caption,pageText:pageText.slice(0,5000)};
   }});return result;
 }
 async function openHidden(url){const tab=await chrome.tabs.create({url,active:false});await waitTab(tab.id);return tab;}
-async function candidateFromTarget(target){
+async function mirrorVideo(baseUrl,pin,d,diag){
+  if(!d?.videoUrl)return d;
+  diag.videoUrlFound++;
+  try{
+    const r=await fetch(d.videoUrl,{credentials:'include',cache:'no-store'});
+    if(!r.ok)throw new Error(`CDN HTTP ${r.status}`);
+    const blob=await r.blob();
+    if(blob.size<1024)throw new Error('영상 데이터가 너무 작습니다');
+    if(blob.size>95*1024*1024)throw new Error('영상이 95MB를 초과합니다');
+    const up=await fetch(`${baseUrl}/api/browser-bridge/upload-video/${encodeURIComponent(d.externalPostId)}`,{method:'POST',headers:{'x-admin-pin':pin,'content-type':'application/octet-stream'},body:await blob.arrayBuffer()});
+    const j=await up.json().catch(()=>({}));if(!up.ok)throw new Error(j.error||`upload HTTP ${up.status}`);
+    diag.mirrored++;
+    console.log(`[ME Bridge] mirrored reel=${d.externalPostId} bytes=${j.bytes||blob.size}`);
+    return {...d,videoUrl:j.url||d.videoUrl,mirrored:true};
+  }catch(e){
+    diag.mirrorFailed++;console.warn(`[ME Bridge] mirror failed reel=${d.externalPostId}`,e);return d;
+  }
+}
+async function candidateFromTarget(target,baseUrl,pin,diag){
+  diag.accountsChecked++;
   let profileTab=null;
   try{
     profileTab=await openHidden(`https://www.instagram.com/${encodeURIComponent(target.username)}/reels/`);
     const links=(await collectLinks(profileTab.id)).sort((a,b)=>productLinkScore(b)-productLinkScore(a));
+    diag.linksFound+=links.length;
     console.log(`[ME Bridge] account=${target.username} reelLinks=${links.length}`);
     for(const choice of links.slice(0,2)){
       let detailTab=null;
       try{
+        diag.detailsTried++;
         detailTab=await openHidden(choice.href);
-        const d=await collectDetail(detailTab.id,target.username,choice.href,choice.text);
-        if(d?.videoUrl&&d?.externalPostId){console.log(`[ME Bridge] valid account=${target.username} reel=${d.externalPostId}`);return d;}
+        let d=await collectDetail(detailTab.id,target.username,choice.href,choice.text);
+        if(d?.videoUrl&&d?.externalPostId){d=await mirrorVideo(baseUrl,pin,d,diag);console.log(`[ME Bridge] valid account=${target.username} reel=${d.externalPostId} mirrored=${d.mirrored?'yes':'no'}`);return d;}
       }catch(e){console.warn('[ME Bridge] detail failed',choice.href,e);}finally{if(detailTab?.id)await chrome.tabs.remove(detailTab.id).catch(()=>{});}
     }
   }catch(e){console.warn('[ME Bridge] profile failed',target.username,e);}finally{if(profileTab?.id)await chrome.tabs.remove(profileTab.id).catch(()=>{});}
@@ -76,16 +104,17 @@ async function candidateFromTarget(target){
 async function runBridge(baseUrl,pin){
   const t=await api(baseUrl,pin,'/api/browser-bridge/targets');const targets=t.items||[];
   const candidates=[];const seen=new Set();let checked=0;
+  const diagnostics={accountsChecked:0,linksFound:0,detailsTried:0,videoUrlFound:0,mirrored:0,mirrorFailed:0};
   for(let i=0;i<targets.length&&candidates.length<TARGET_BUFFER;i+=BATCH_SIZE){
     const batch=targets.slice(i,i+BATCH_SIZE);checked+=batch.length;
-    const results=await Promise.all(batch.map(candidateFromTarget));
+    const results=await Promise.all(batch.map(target=>candidateFromTarget(target,baseUrl,pin,diagnostics)));
     for(const d of results){if(!d||seen.has(d.externalPostId))continue;seen.add(d.externalPostId);candidates.push(d);if(candidates.length>=TARGET_BUFFER)break;}
     console.log(`[ME Bridge] progress checked=${checked}/${targets.length} valid=${candidates.length}/${TARGET_BUFFER}`);
     if(candidates.length>=TARGET_BUFFER)break;
     await sleep(250);
   }
-  const submitted=await api(baseUrl,pin,'/api/browser-bridge/submit',{method:'POST',body:JSON.stringify({candidates:candidates.slice(0,TARGET_BUFFER)})});
-  return {ok:true,targets:checked,candidates:candidates.length,selected:Math.min(Number(submitted.selected||0),MAX_FINAL),stoppedEarly:checked<targets.length};
+  const submitted=await api(baseUrl,pin,'/api/browser-bridge/submit',{method:'POST',body:JSON.stringify({candidates:candidates.slice(0,TARGET_BUFFER),diagnostics})});
+  return {ok:true,targets:checked,candidates:candidates.length,selected:Math.min(Number(submitted.selected||0),MAX_FINAL),stoppedEarly:checked<targets.length,diagnostics};
 }
 
 chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
