@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { spawn } from 'node:child_process';
+import { spawn,spawnSync } from 'node:child_process';
 import { storagePath } from '../../lib/util.js';
 import { withRetry } from '../../lib/retry.js';
 import { cleanChineseSubtitles } from './SubtitleCleaner.js';
@@ -18,6 +18,19 @@ function refererFor(platform,sourceUrl=''){
 function validFile(file){
   try{return fs.statSync(file).size>4096;}catch{return false;}
 }
+function assertVideoStream(file){
+  const r=spawnSync('ffprobe',['-v','error','-select_streams','v:0','-show_entries','stream=codec_type,width,height','-of','json',file],{encoding:'utf8'});
+  let stream=null;
+  try{stream=JSON.parse(r.stdout||'{}')?.streams?.[0]||null;}catch{}
+  if(r.status!==0||!stream||stream.codec_type!=='video'||!Number(stream.width)||!Number(stream.height)){
+    let detail=String(r.stderr||'').trim().slice(-300);
+    if(!detail){
+      const f=spawnSync('ffmpeg',['-hide_banner','-i',file],{encoding:'utf8'});
+      detail=String(f.stderr||'').trim().slice(-500);
+    }
+    throw new Error(`비디오 스트림이 없는 미디어입니다${detail?`: ${detail}`:''}`);
+  }
+}
 
 async function fetchDownload({url,output,referer}){
   const headers={
@@ -30,6 +43,7 @@ async function fetchDownload({url,output,referer}){
   if(!r.ok||!r.body)throw new Error(`HTTP ${r.status}`);
   await pipeline(Readable.fromWeb(r.body),fs.createWriteStream(output));
   if(!validFile(output))throw new Error('다운로드 파일이 비어 있거나 너무 작습니다.');
+  assertVideoStream(output);
 }
 
 function ffmpegDownload({url,output,referer}){
@@ -41,8 +55,8 @@ function ffmpegDownload({url,output,referer}){
     child.stderr.on('data',d=>{err+=String(d);if(err.length>4000)err=err.slice(-4000);});
     child.on('error',reject);
     child.on('close',code=>{
-      if(code===0&&validFile(output))return resolve();
-      reject(new Error(`ffmpeg 다운로드 실패 code=${code}${err?` ${err.trim()}`:''}`));
+      if(code!==0||!validFile(output))return reject(new Error(`ffmpeg 다운로드 실패 code=${code}${err?` ${err.trim()}`:''}`));
+      try{assertVideoStream(output);resolve();}catch(e){reject(e);}
     });
   });
 }
@@ -67,6 +81,7 @@ async function downloadWithFallback({postId,url,output,platform,sourceUrl}){
     await ffmpegDownload({url,output,referer});
     console.log(`[SocialVideo] download success method=ffmpeg post=${postId}`);
   }catch(err){
+    try{fs.rmSync(output,{force:true});}catch{}
     throw new Error(`영상 다운로드 최종 실패: fetch=${fetchError} / ffmpeg=${String(err?.message||err)}`);
   }
 }
