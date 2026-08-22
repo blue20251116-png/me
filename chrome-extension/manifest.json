@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ME Instagram Reel Bridge",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "로그인된 Chrome에서 벤치마킹 Instagram Reels를 수집해 ME 서버로 전달합니다.",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [

@@ -7,6 +7,15 @@ function validReelCode(code=''){
   const s=String(code||'').trim();
   return /^[A-Za-z0-9_-]{8,30}$/.test(s)&&!/^[a-z]{2}_[A-Z]{2}$/.test(s);
 }
+function uniqueUrls(values=[]){
+  const seen=new Set();const out=[];
+  for(const raw of values){
+    const v=String(raw||'').trim();
+    if(!/^https?:\/\//i.test(v)||seen.has(v))continue;
+    seen.add(v);out.push(v);
+  }
+  return out;
+}
 async function api(baseUrl,pin,path,opt={}){
   const r=await fetch(`${baseUrl}${path}`,{...opt,headers:{'content-type':'application/json','x-admin-pin':pin,...(opt.headers||{})}});
   const j=await r.json().catch(()=>({}));
@@ -40,7 +49,6 @@ async function collectProfileCandidates(tabId,username){
       try{const u=new URL(href,location.origin);const m=u.pathname.match(/^\/reel\/([A-Za-z0-9_-]+)/);if(m)add(m[1],text,source);}catch{}
     };
     const diag={pageUrl:location.href,title:document.title,apiStatus:0,apiEdges:0,domAnchors:0,domReels:0,htmlShortcodes:0,bodyPreview:''};
-
     try{
       const r=await fetch(`/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,{
         credentials:'include',
@@ -50,11 +58,7 @@ async function collectProfileCandidates(tabId,username){
       if(r.ok){
         const j=await r.json();
         const user=j?.data?.user||j?.user||{};
-        const buckets=[
-          user?.edge_owner_to_timeline_media?.edges,
-          user?.edge_felix_video_timeline?.edges,
-          user?.edge_clips_grid?.edges
-        ];
+        const buckets=[user?.edge_owner_to_timeline_media?.edges,user?.edge_felix_video_timeline?.edges,user?.edge_clips_grid?.edges];
         for(const edges of buckets){
           if(!Array.isArray(edges))continue;
           diag.apiEdges+=edges.length;
@@ -67,7 +71,6 @@ async function collectProfileCandidates(tabId,username){
         }
       }
     }catch(e){diag.apiError=String(e?.message||e).slice(0,180);}
-
     const scanDom=()=>{
       const all=[...document.querySelectorAll('a[href]')];diag.domAnchors=Math.max(diag.domAnchors,all.length);
       for(const a of all){
@@ -112,37 +115,74 @@ async function collectDetail(tabId,username,sourceUrl,seedText=''){
     const html=document.documentElement?.innerHTML||'';
     const unescapeUrl=s=>String(s||'').replace(/\\u0026/g,'&').replace(/\\u0025/g,'%').replace(/\\\//g,'/').replace(/&amp;/g,'&');
     const embedded=[];
-    for(const re of [/"video_url"\s*:\s*"(https:[^"]+)"/g,/"url"\s*:\s*"(https:[^"]+(?:cdninstagram|fbcdn)[^"]*)"/g]){let m,guard=0;while((m=re.exec(html))&&guard++<40)embedded.push(unescapeUrl(m[1]));}
-    const perf=(performance.getEntriesByType('resource')||[]).map(x=>String(x.name||'')).filter(x=>/^https:\/\//.test(x)&&/(cdninstagram|fbcdn)/i.test(x)&&/(video|\.mp4|bytestart|byteend|oe=)/i.test(x));
+    for(const re of [/"video_url"\s*:\s*"(https:[^"]+)"/g,/"url"\s*:\s*"(https:[^"]+(?:cdninstagram|fbcdn)[^"]*)"/g]){
+      let m,guard=0;while((m=re.exec(html))&&guard++<80)embedded.push(unescapeUrl(m[1]));
+    }
+    const perf=(performance.getEntriesByType('resource')||[])
+      .map(x=>String(x.name||''))
+      .filter(x=>/^https:\/\//.test(x)&&/(cdninstagram|fbcdn)/i.test(x)&&/(video|\.mp4|bytestart|byteend|oe=)/i.test(x));
     const dom=v?.currentSrc||v?.src||v?.querySelector('source')?.src||'';
-    const candidates=[dom,meta('og:video:secure_url'),meta('og:video'),...embedded,...perf].map(unescapeUrl).filter(x=>/^https?:\/\//i.test(x));
+    const all=[dom,meta('og:video:secure_url'),meta('og:video'),...embedded,...perf].map(unescapeUrl).filter(x=>/^https?:\/\//i.test(x));
+    const uniq=[...new Set(all)].slice(0,12);
     const m=sourceUrl.match(/\/reel\/([A-Za-z0-9_-]+)/);
-    return {username,sourceUrl,externalPostId:m?.[1]||'',videoUrl:candidates[0]||'',thumbnailUrl:v?.poster||meta('og:image')||'',caption,pageText:pageText.slice(0,5000)};
+    return {username,sourceUrl,externalPostId:m?.[1]||'',videoUrl:uniq[0]||'',videoUrls:uniq,thumbnailUrl:v?.poster||meta('og:image')||'',caption,pageText:pageText.slice(0,5000)};
   }});
   return result;
 }
 
+function noteMirrorError(diag,reel,reason){
+  diag.mirrorErrors=diag.mirrorErrors||[];
+  if(diag.mirrorErrors.length<12)diag.mirrorErrors.push({reel:String(reel||''),reason:String(reason||'').slice(0,180)});
+}
+async function fetchCandidateBuffer(url){
+  const tries=[
+    {credentials:'include',cache:'no-store'},
+    {credentials:'omit',cache:'no-store'},
+    {credentials:'include',cache:'no-store',headers:{Range:'bytes=0-'}}
+  ];
+  let last='';
+  for(const opt of tries){
+    try{
+      const r=await fetch(url,opt);
+      if(!r.ok){last=`CDN HTTP ${r.status}`;continue;}
+      const contentType=String(r.headers.get('content-type')||'').toLowerCase();
+      if(contentType&&(contentType.startsWith('text/')||contentType.startsWith('image/')||contentType.includes('json'))){last=`not-video ${contentType}`;continue;}
+      const blob=await r.blob();
+      if(blob.size<100*1024){last=`too-small ${blob.size}`;continue;}
+      if(blob.size>95*1024*1024){last=`too-large ${blob.size}`;continue;}
+      const buffer=await blob.arrayBuffer();
+      const head=new Uint8Array(buffer.slice(0,32));
+      const text=String.fromCharCode(...head);
+      if(!text.includes('ftyp')){last=`no-ftyp size=${blob.size}`;continue;}
+      return {buffer,size:blob.size,contentType};
+    }catch(e){last=String(e?.message||e);}
+  }
+  throw new Error(last||'video fetch failed');
+}
 async function mirrorVideo(baseUrl,pin,d,diag){
-  if(!d?.videoUrl||!validReelCode(d.externalPostId))return d;
+  const urls=uniqueUrls([...(Array.isArray(d?.videoUrls)?d.videoUrls:[]),d?.videoUrl]).slice(0,8);
+  if(!urls.length||!validReelCode(d.externalPostId))return d;
   diag.videoUrlFound++;
-  try{
-    const r=await fetch(d.videoUrl,{credentials:'include',cache:'no-store'});
-    if(!r.ok)throw new Error(`CDN HTTP ${r.status}`);
-    const contentType=String(r.headers.get('content-type')||'').toLowerCase();
-    if(contentType&&(contentType.startsWith('text/')||contentType.startsWith('image/')||contentType.includes('json')))throw new Error(`영상이 아닌 응답입니다 (${contentType})`);
-    const blob=await r.blob();
-    if(blob.size<100*1024)throw new Error(`영상 데이터가 너무 작습니다 (${blob.size} bytes)`);
-    if(blob.size>95*1024*1024)throw new Error('영상이 95MB를 초과합니다');
-    const buffer=await blob.arrayBuffer();
-    const head=new Uint8Array(buffer.slice(0,16));
-    const signature=head.length>=8?String.fromCharCode(head[4],head[5],head[6],head[7]):'';
-    if(signature!=='ftyp')throw new Error(`MP4 시그니처가 아닙니다 (${signature||'empty'})`);
-    const up=await fetch(`${baseUrl}/api/browser-bridge/upload-video/${encodeURIComponent(d.externalPostId)}`,{method:'POST',headers:{'x-admin-pin':pin,'content-type':'video/mp4'},body:buffer});
-    const j=await up.json().catch(()=>({}));if(!up.ok)throw new Error(j.error||`upload HTTP ${up.status}`);
-    diag.mirrored++;
-    console.log(`[ME Bridge] mirrored reel=${d.externalPostId} bytes=${j.bytes||blob.size}`);
-    return {...d,videoUrl:j.url||d.videoUrl,mirrored:true};
-  }catch(e){diag.mirrorFailed++;console.warn(`[ME Bridge] mirror failed reel=${d.externalPostId}`,e);return {...d,videoUrl:'',mirrored:false};}
+  let lastError='';
+  for(let i=0;i<urls.length;i++){
+    try{
+      const got=await fetchCandidateBuffer(urls[i]);
+      const up=await fetch(`${baseUrl}/api/browser-bridge/upload-video/${encodeURIComponent(d.externalPostId)}`,{
+        method:'POST',headers:{'x-admin-pin':pin,'content-type':'video/mp4'},body:got.buffer
+      });
+      const j=await up.json().catch(()=>({}));
+      if(!up.ok)throw new Error(j.error||`upload HTTP ${up.status}`);
+      diag.mirrored++;
+      console.log(`[ME Bridge] mirrored reel=${d.externalPostId} candidate=${i+1}/${urls.length} bytes=${j.bytes||got.size}`);
+      return {...d,videoUrl:j.url||urls[i],videoUrls:urls,mirrored:true};
+    }catch(e){
+      lastError=`candidate ${i+1}/${urls.length}: ${String(e?.message||e)}`;
+      console.warn(`[ME Bridge] mirror candidate failed reel=${d.externalPostId} ${lastError}`);
+    }
+  }
+  diag.mirrorFailed++;
+  noteMirrorError(diag,d.externalPostId,lastError);
+  return {...d,videoUrl:'',videoUrls:urls,mirrored:false};
 }
 
 async function candidateFromTarget(target,baseUrl,pin,diag){
@@ -163,7 +203,7 @@ async function candidateFromTarget(target,baseUrl,pin,diag){
         detailTab=await openHidden(choice.href);
         let d=await collectDetail(detailTab.id,target.username,choice.href,choice.text);
         if(!validReelCode(d?.externalPostId))continue;
-        if(d?.videoUrl){d=await mirrorVideo(baseUrl,pin,d,diag);if(d?.mirrored)return d;}
+        if((d?.videoUrls?.length||0)>0){d=await mirrorVideo(baseUrl,pin,d,diag);if(d?.mirrored)return d;}
       }catch(e){console.warn('[ME Bridge] detail failed',choice.href,e);}finally{if(detailTab?.id)await chrome.tabs.remove(detailTab.id).catch(()=>{});}
     }
   }catch(e){console.warn('[ME Bridge] profile failed',target.username,e);}finally{if(profileTab?.id)await chrome.tabs.remove(profileTab.id).catch(()=>{});}
@@ -173,7 +213,7 @@ async function candidateFromTarget(target,baseUrl,pin,diag){
 async function runBridge(baseUrl,pin){
   const t=await api(baseUrl,pin,'/api/browser-bridge/targets');const targets=t.items||[];
   const candidates=[];const seen=new Set();let checked=0;
-  const diagnostics={accountsChecked:0,linksFound:0,detailsTried:0,videoUrlFound:0,mirrored:0,mirrorFailed:0,profileDiagnostics:[]};
+  const diagnostics={accountsChecked:0,linksFound:0,detailsTried:0,videoUrlFound:0,mirrored:0,mirrorFailed:0,mirrorErrors:[],profileDiagnostics:[]};
   for(let i=0;i<targets.length&&candidates.length<TARGET_BUFFER;i+=BATCH_SIZE){
     const batch=targets.slice(i,i+BATCH_SIZE);checked+=batch.length;
     const results=await Promise.all(batch.map(target=>candidateFromTarget(target,baseUrl,pin,diagnostics)));
