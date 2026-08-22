@@ -2,72 +2,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { storagePath } from '../../lib/util.js';
+import { getSecret } from '../../lib/settingsStore.js';
 
-const CLEAN_VERSION='v3';
+const CLEAN_VERSION='v4';
 function validDims(w,h){return Number.isFinite(w)&&Number.isFinite(h)&&w>1&&h>1;}
 function parseRate(v){const s=String(v||'');if(s.includes('/')){const[a,b]=s.split('/').map(Number);return b?a/b:0;}return Number(s)||0;}
-function probeVideo(file){try{const r=spawnSync('ffprobe',['-v','error','-select_streams','v:0','-show_entries','stream=width,height,avg_frame_rate','-of','json',file],{encoding:'utf8',timeout:15000});const s=JSON.parse(r.stdout||'{}')?.streams?.[0]||{};if(validDims(+s.width,+s.height))return{width:+s.width,height:+s.height,fps:parseRate(s.avg_frame_rate)};}catch{}return{width:1080,height:1920,fps:30};}
+function probeVideo(file){try{const r=spawnSync('ffprobe',['-v','error','-select_streams','v:0','-show_entries','stream=width,height,avg_frame_rate,duration','-of','json',file],{encoding:'utf8',timeout:15000});const s=JSON.parse(r.stdout||'{}')?.streams?.[0]||{};if(validDims(+s.width,+s.height))return{width:+s.width,height:+s.height,fps:parseRate(s.avg_frame_rate),duration:Number(s.duration)||0};}catch{}return{width:1080,height:1920,fps:30,duration:0};}
 function even(n){n=Math.max(2,Math.round(n));return n%2?n-1:n;}
 function reusable(out,input){try{const a=fs.statSync(out),b=fs.statSync(input);return a.size>100*1024&&a.mtimeMs>=b.mtimeMs;}catch{return false;}}
 function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+function baseEdgeCropFilters(w,h){const left=even(w*0.035),top=even(h*0.025),right=even(w*0.035),bottom=even(h*0.15);const cropW=even(w-left-right),cropH=even(h-top-bottom);return [`crop=${cropW}:${cropH}:${left}:${top}`,`scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos`,`crop=${w}:${h}`];}
+function renderVideo({inputPath,out,w,h,fps,boxes=[]}){const filters=[];if(fps>30)filters.push('fps=30');for(const b of boxes){const x=clamp(even(b.x),0,w-4),y=clamp(even(b.y),0,h-4),rw=clamp(even(b.w),4,w-x),rh=clamp(even(b.h),4,h-y);if(rw>=4&&rh>=4)filters.push(`delogo=x=${x}:y=${y}:w=${rw}:h=${rh}:show=0`);}filters.push(...baseEdgeCropFilters(w,h));const tmp=`${out}.tmp.mp4`;try{fs.rmSync(tmp,{force:true});}catch{}const r=spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-y','-i',inputPath,'-vf',filters.join(','),'-map','0:v:0','-map','0:a?','-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart',tmp],{encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024});if(r.status!==0||!fs.existsSync(tmp)){try{fs.rmSync(tmp,{force:true});}catch{}throw new Error(`자막/워터마크 제거 V4 실패: ${r.error?.message||String(r.stderr||'').slice(-700)}`);}fs.renameSync(tmp,out);}
+function extractFrames(postId,inputPath,duration){const dir=storagePath('frames',`${postId}-overlay-v4`);fs.mkdirSync(dir,{recursive:true});const times=duration>2?[Math.max(.2,duration*.18),Math.max(.5,duration*.50),Math.max(.8,duration*.82)]:[.2,.7,1.2];const files=[];for(let i=0;i<times.length;i++){const file=path.join(dir,`overlay-${i}.jpg`);const r=spawnSync('ffmpeg',['-hide_banner','-loglevel','error','-y','-ss',String(times[i]),'-i',inputPath,'-frames:v','1','-vf','scale=540:-2','-q:v','3',file],{encoding:'utf8',timeout:30000});if(r.status===0&&fs.existsSync(file)&&fs.statSync(file).size>2000)files.push(file);}return files;}
+function parseGeminiJson(text){const raw=String(text||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');try{return JSON.parse(raw)}catch{}const a=raw.indexOf('{'),b=raw.lastIndexOf('}');if(a>=0&&b>a)return JSON.parse(raw.slice(a,b+1));return{};}
+function sanitizeBoxes(data,w,h){const items=Array.isArray(data?.boxes)?data.boxes:[];const out=[];for(const b of items){const conf=Number(b.confidence||0);if(conf<0.65)continue;let x=Number(b.x),y=Number(b.y),bw=Number(b.w),bh=Number(b.h);if(![x,y,bw,bh].every(Number.isFinite))continue;if(x<=1&&y<=1&&bw<=1&&bh<=1){x*=w;y*=h;bw*=w;bh*=h;}const type=String(b.type||'overlay').toLowerCase();const central=y>h*.08&&y+bh<h*.86&&x>w*.02&&x+bw<w*.98;const reasonable=bw<=w*.88&&bh<=h*.24&&bw>=w*.04&&bh>=h*.018;if(!central||!reasonable)continue;out.push({x:Math.round(x-6),y:Math.round(y-4),w:Math.round(bw+12),h:Math.round(bh+8),type,confidence:conf});}
+// Merge nearly identical boxes from different sampled frames.
+out.sort((a,b)=>a.y-b.y||a.x-b.x);const merged=[];for(const b of out){const m=merged.find(x=>Math.abs(x.x-b.x)<w*.06&&Math.abs(x.y-b.y)<h*.04&&Math.abs(x.w-b.w)<w*.12&&Math.abs(x.h-b.h)<h*.05);if(m){m.x=Math.min(m.x,b.x);m.y=Math.min(m.y,b.y);m.w=Math.max(m.x+m.w,b.x+b.w)-m.x;m.h=Math.max(m.y+m.h,b.y+b.h)-m.y;m.confidence=Math.max(m.confidence,b.confidence);}else merged.push({...b});}return merged.slice(0,4);}
+async function detectOverlayBoxes({postId,inputPath,w,h,duration}){const key=getSecret('GEMINI_API_KEY')||process.env.GEMINI_API_KEY;if(!key){console.warn(`[SubtitleCleanerV4] Gemini key missing post=${postId} central-detect=skip`);return[];}const frames=extractFrames(postId,inputPath,duration);if(!frames.length)return[];const model=process.env.GEMINI_VISION_MODEL||process.env.GEMINI_TEXT_MODEL||'gemini-3.5-flash-lite';const parts=[{text:'세 장의 같은 세로 영상 프레임을 보고 영상 자체 내용이 아닌 오버레이만 찾아라. 대상은 자막 캡션 계정명 로고 워터마크 스티커형 텍스트다. 사람 제품 포장지의 원래 글자 간판 화면 속 실제 사물의 글자는 제외한다. 화면 가장자리의 작은 플랫폼 UI는 제외한다. 중앙 또는 화면 안쪽에 반복되는 오버레이만 boxes에 넣어라. 좌표는 각 원본 프레임 전체 기준 0~1 비율 x y w h로 반환한다. 같은 위치 오버레이는 한 박스로 합친다. JSON만 반환: {"hasOverlay":true,"boxes":[{"x":0.1,"y":0.4,"w":0.8,"h":0.08,"type":"subtitle|watermark|logo","confidence":0.9}]}' }];for(const f of frames)parts.push({inlineData:{mimeType:'image/jpeg',data:fs.readFileSync(f).toString('base64')}});const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts}],generationConfig:{responseMimeType:'application/json',temperature:0.1}}),signal:AbortSignal.timeout(45000)});const raw=await r.text();if(!r.ok)throw new Error(`Gemini overlay detect ${r.status}: ${raw.slice(0,300)}`);let data={};try{const j=JSON.parse(raw);const text=(j?.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('\n');data=parseGeminiJson(text);}catch{}return sanitizeBoxes(data,w,h);}
+function scheduleSmartRefine({postId,inputPath,out,w,h,fps,duration}){const marker=`${out}.analysis.json`;if(fs.existsSync(marker))return;setImmediate(async()=>{try{const boxes=await detectOverlayBoxes({postId,inputPath,w,h,duration});if(boxes.length){renderVideo({inputPath,out,w,h,fps,boxes});console.log(`[SubtitleCleanerV4] post=${postId} strategy=gemini-targeted boxes=${boxes.length} ${boxes.map(b=>`${b.type}@${b.x},${b.y},${b.w},${b.h}`).join(' | ')}`);}else console.log(`[SubtitleCleanerV4] post=${postId} strategy=edge-crop-only central-overlay=none`);fs.writeFileSync(marker,JSON.stringify({version:CLEAN_VERSION,boxes,checkedAt:new Date().toISOString()}));}catch(err){console.warn(`[SubtitleCleanerV4] smart-refine failed post=${postId} reason=${String(err?.message||err)}`);try{fs.writeFileSync(marker,JSON.stringify({version:CLEAN_VERSION,error:String(err?.message||err),checkedAt:new Date().toISOString()}));}catch{}}});}
 
 export function cleanChineseSubtitles({postId,inputPath,mode='AUTO',region=null}){
   if(!inputPath||!fs.existsSync(inputPath))throw new Error('원본 영상 파일이 없습니다.');
-  const out=storagePath('clean',`${postId}-clean-${CLEAN_VERSION}.mp4`);
-  fs.mkdirSync(path.dirname(out),{recursive:true});
-  if(reusable(out,inputPath)){
-    console.log(`[SubtitleCleanerV3] reuse post=${postId}`);
-    return{outputPath:out,mode:'V3',reused:true};
-  }
-
-  const p=probeVideo(inputPath),w=even(p.width),h=even(p.height);
-  const requested=String(mode||'AUTO').toUpperCase();
-  if(requested==='NONE'){
-    console.log(`[SubtitleCleanerV3] no-clean post=${postId}`);
-    return{outputPath:inputPath,mode:'NONE',reused:true};
-  }
-
-  const filters=[];
-  if(p.fps>30)filters.push('fps=30');
-  let strategy='edge-crop-v3';
-
-  if(region&&Number(region.w)>0&&Number(region.h)>0){
-    const x=clamp(Math.round(Number(region.x)||0),0,w-2);
-    const y=clamp(Math.round(Number(region.y)||0),0,h-2);
-    const rw=clamp(Math.round(Number(region.w)),2,w-x);
-    const rh=clamp(Math.round(Number(region.h)),2,h-y);
-    filters.push(`delogo=x=${x}:y=${y}:w=${rw}:h=${rh}:show=0`);
-    strategy='targeted-delogo';
-  }else{
-    // V3: 자막/워터마크가 주로 붙는 가장자리 자체를 제거한다.
-    // 좌우 4%, 상단 4%, 하단 15%를 잘라낸 뒤 원래 9:16 캔버스로 복원한다.
-    // V2처럼 하단 11%만 자르는 것보다 워터마크/하단 자막 제거 범위를 넓히되,
-    // 화면 중앙을 delogo로 뭉개지는 않는다.
-    const left=even(w*0.04);
-    const top=even(h*0.04);
-    const right=even(w*0.04);
-    const bottom=even(h*0.15);
-    const cropW=even(w-left-right);
-    const cropH=even(h-top-bottom);
-    filters.push(
-      `crop=${cropW}:${cropH}:${left}:${top}`,
-      `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos`,
-      `crop=${w}:${h}`
-    );
-  }
-
-  const r=spawnSync('ffmpeg',[
-    '-hide_banner','-loglevel','error','-y','-i',inputPath,
-    '-vf',filters.join(','),'-map','0:v:0','-map','0:a?',
-    '-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p',
-    '-c:a','aac','-b:a','128k','-movflags','+faststart',out
-  ],{encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024});
-
-  if(r.status!==0||!fs.existsSync(out)){
-    try{fs.rmSync(out,{force:true});}catch{}
-    throw new Error(`자막/워터마크 제거 V3 실패: ${r.error?.message||String(r.stderr||'').slice(-700)}`);
-  }
-
-  console.log(`[SubtitleCleanerV3] post=${postId} input=${p.width}x${p.height}@${Math.round(p.fps||0)} strategy=${strategy} output=${out}`);
-  return{outputPath:out,mode:'V3',strategy,width:w,height:h,reused:false};
+  const out=storagePath('clean',`${postId}-clean-${CLEAN_VERSION}.mp4`);fs.mkdirSync(path.dirname(out),{recursive:true});
+  const p=probeVideo(inputPath),w=even(p.width),h=even(p.height),requested=String(mode||'AUTO').toUpperCase();
+  if(requested==='NONE'){console.log(`[SubtitleCleanerV4] no-clean post=${postId}`);return{outputPath:inputPath,mode:'NONE',reused:true};}
+  if(region&&Number(region.w)>0&&Number(region.h)>0){const box={x:Number(region.x)||0,y:Number(region.y)||0,w:Number(region.w),h:Number(region.h),type:'manual',confidence:1};renderVideo({inputPath,out,w,h,fps:p.fps,boxes:[box]});console.log(`[SubtitleCleanerV4] post=${postId} strategy=manual-targeted output=${out}`);return{outputPath:out,mode:'V4',strategy:'manual-targeted',reused:false};}
+  if(!reusable(out,inputPath)){renderVideo({inputPath,out,w,h,fps:p.fps,boxes:[]});console.log(`[SubtitleCleanerV4] post=${postId} input=${p.width}x${p.height}@${Math.round(p.fps||0)} strategy=edge-crop-first output=${out}`);}else console.log(`[SubtitleCleanerV4] reuse post=${postId}`);
+  scheduleSmartRefine({postId,inputPath,out,w,h,fps:p.fps,duration:p.duration});
+  return{outputPath:out,mode:'V4',strategy:'edge-crop+gemini-refine',width:w,height:h,reused:reusable(out,inputPath)};
 }
