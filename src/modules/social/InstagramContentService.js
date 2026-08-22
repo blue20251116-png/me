@@ -94,6 +94,12 @@ async function resolveFinalUrl(url){
   const normalized=normalizeUrl(url);if(!normalized)return '';
   try{const r=await fetch(normalized,{method:'GET',headers:{'user-agent':UA},redirect:'follow',signal:AbortSignal.timeout(15000)});return r.url||normalized;}catch{return normalized;}
 }
+function isCanonicalCoupangProductUrl(url=''){
+  try{
+    const u=new URL(normalizeUrl(url));
+    return /(^|\.)coupang\.com$/i.test(u.hostname)&&/^\/vp\/products\/\d+/i.test(u.pathname);
+  }catch{return false;}
+}
 
 export async function matchInpockProduct({inpockUrl,caption='',transcript='',rewrittenScript=null}){
   const normalizedInpockUrl=normalizeUrl(inpockUrl);if(!normalizedInpockUrl)return null;
@@ -104,6 +110,8 @@ export async function matchInpockProduct({inpockUrl,caption='',transcript='',rew
   let best=ranked.find(x=>x.score>=35)||ranked.find(x=>/coupang|link\.coupang/i.test(x.href));
   if(!best)return null;
   const finalUrl=await resolveFinalUrl(best.href);
-  const isCoupang=/https?:\/\/[^/]*coupang\.com\//i.test(finalUrl)||/https?:\/\/link\.coupang\.com\//i.test(best.href);
+  // Only canonical product pages are sent directly to Coupang deeplink API.
+  // Tracking/app/redirect URLs fall back to normal Coupang product search in discovery.js.
+  const isCoupang=isCanonicalCoupangProductUrl(finalUrl);
   return {...best,finalUrl,isCoupang,catalogCount:catalog.length};
 }

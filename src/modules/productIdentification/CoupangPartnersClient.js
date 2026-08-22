@@ -28,7 +28,7 @@ async function waitForSearchSlot(){
     await sleep(wait);
   }
 }
-async function request(method,path,query='',body=null){
+async function request(method,path,query='',body=null,{attempts=2}={}){
   return withRetry(async()=>{
     const url=`${HOST}${path}${query?`?${query}`:''}`;
     const r=await fetch(url,{method,headers:{Authorization:auth(method,path,query),'content-type':'application/json;charset=UTF-8'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(20000)});
@@ -37,7 +37,7 @@ async function request(method,path,query='',body=null){
     const json=JSON.parse(text||'{}');
     if(String(json.rCode??'0')!=='0') throw new Error(`쿠팡 파트너스 오류: ${json.rMessage||json.rCode}`);
     return json.data;
-  },{attempts:2,label:`coupang:${method}:${path}`});
+  },{attempts,label:`coupang:${method}:${path}`});
 }
 export async function searchCoupangProducts(keyword,{limit=SEARCH_RESULT_LIMIT,subId=''}={}){
   await waitForSearchSlot();
@@ -50,6 +50,7 @@ export async function searchCoupangProducts(keyword,{limit=SEARCH_RESULT_LIMIT,s
 }
 export async function createCoupangDeepLink(coupangUrl,{subId=''}={}){
   const path=`${BASE}/deeplink`;
-  const data=await request('POST',path,'',{coupangUrls:[coupangUrl],...(subId?{subId}:{})});
+  // url convert failed is deterministic for the same URL, so do not waste a second request.
+  const data=await request('POST',path,'',{coupangUrls:[coupangUrl],...(subId?{subId}:{})},{attempts:1});
   return Array.isArray(data)?data[0]||null:null;
 }
