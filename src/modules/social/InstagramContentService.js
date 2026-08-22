@@ -11,18 +11,41 @@ function stripTags(s=''){return decodeHtml(String(s).replace(/<[^>]+>/g,' ').rep
 function normalizeText(s=''){return String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();}
 function tokens(s=''){return new Set(normalizeText(s).split(' ').filter(x=>x.length>1));}
 function scoreText(query,title){const a=tokens(query),b=tokens(title);if(!a.size||!b.size)return 0;const common=[...a].filter(x=>b.has(x)).length;return Math.round(common/Math.max(1,Math.min(a.size,b.size))*100);}
-function collectUrls(obj,out=[],depth=0){if(depth>7||obj==null)return out;if(typeof obj==='string'){for(const m of obj.matchAll(/https?:\\?\/\\?\/[^\s"'<>]+/g))out.push(m[0].replace(/\\\//g,'/'));return out;}if(Array.isArray(obj)){for(const v of obj)collectUrls(v,out,depth+1);return out;}if(typeof obj==='object')for(const v of Object.values(obj))collectUrls(v,out,depth+1);return out;}
-export function findInpockUrlInMetadata(metadata){return collectUrls(metadata).find(u=>/https?:\/\/link\.inpock\.co\.kr\//i.test(u))||'';}
+function normalizeUrl(value=''){
+  let s=decodeHtml(String(value||'').trim()).replace(/^['"]+|['"]+$/g,'');
+  if(!s)return '';
+  s=s.replace(/\\u0026/g,'&').replace(/\\\//g,'/');
+  if(/^\/\//.test(s))s=`https:${s}`;
+  else if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)&&/^[\w.-]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(s))s=`https://${s}`;
+  try{return new URL(s).toString();}catch{return s;}
+}
+function collectUrls(obj,out=[],depth=0){
+  if(depth>7||obj==null)return out;
+  if(typeof obj==='string'){
+    const raw=String(obj).replace(/\\u0026/g,'&').replace(/\\\//g,'/');
+    for(const m of raw.matchAll(/(?:https?:\/\/|\/\/)?(?:link\.inpock\.co\.kr|moneying\.biz|m\.site\.naver\.com|[^\s"'<>]+\.coupang\.com)\/[^\s"'<>]*/gi)){
+      const u=normalizeUrl(m[0]);if(u)out.push(u);
+    }
+    for(const m of raw.matchAll(/https?:\/\/[^\s"'<>]+/g)){const u=normalizeUrl(m[0]);if(u)out.push(u);}
+    return out;
+  }
+  if(Array.isArray(obj)){for(const v of obj)collectUrls(v,out,depth+1);return out;}
+  if(typeof obj==='object')for(const v of Object.values(obj))collectUrls(v,out,depth+1);
+  return out;
+}
+export function findInpockUrlInMetadata(metadata){
+  return collectUrls(metadata).find(u=>/(?:link\.inpock\.co\.kr|moneying\.biz\/link\/gooditem)/i.test(u))||'';
+}
 
 export async function detectInpockProfileUrl(username,metadata={}){
-  const fromMeta=findInpockUrlInMetadata(metadata);if(fromMeta)return fromMeta;
+  const fromMeta=normalizeUrl(findInpockUrlInMetadata(metadata));if(fromMeta)return fromMeta;
   const user=String(username||'').replace(/^@/,'').trim();if(!user)return '';
   try{
     const r=await fetch(`https://www.instagram.com/${encodeURIComponent(user)}/`,{headers:{'user-agent':UA,'accept-language':'ko-KR,ko;q=0.9,en;q=0.7'},redirect:'follow',signal:AbortSignal.timeout(15000)});
     const html=await r.text();
     const raw=html.replace(/\\u0026/g,'&').replace(/\\\//g,'/');
-    const m=raw.match(/https?:\/\/link\.inpock\.co\.kr\/[A-Za-z0-9_?=&%./-]+/i);
-    return m?.[0]||'';
+    const m=raw.match(/(?:https?:\/\/)?(?:link\.inpock\.co\.kr|moneying\.biz\/link\/gooditem)[A-Za-z0-9_?=&%./:-]*/i);
+    return normalizeUrl(m?.[0]||'');
   }catch{return '';}
 }
 
@@ -50,29 +73,31 @@ export async function rewriteInstagramScript({caption='',transcript='',productNa
 }
 
 async function fetchInpockCatalog(inpockUrl){
-  if(!inpockUrl)return [];
-  const r=await fetch(inpockUrl,{headers:{'user-agent':UA,'accept-language':'ko-KR,ko;q=0.9'},redirect:'follow',signal:AbortSignal.timeout(20000)});
+  const normalizedInpockUrl=normalizeUrl(inpockUrl);
+  if(!normalizedInpockUrl)return [];
+  const r=await fetch(normalizedInpockUrl,{headers:{'user-agent':UA,'accept-language':'ko-KR,ko;q=0.9'},redirect:'follow',signal:AbortSignal.timeout(20000)});
   const html=await r.text();if(!r.ok)throw new Error(`인포크 페이지 오류 (${r.status})`);
   const items=[];
   const anchorRe=/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   for(const m of html.matchAll(anchorRe)){
-    let href=decodeHtml(m[1]);const title=stripTags(m[2]);
+    let href=normalizeUrl(decodeHtml(m[1]));const title=stripTags(m[2]);
     try{href=new URL(href,r.url).toString();}catch{}
     if(/^https?:\/\//i.test(href)&&title)items.push({title,href});
   }
-  // Some Inpock pages hydrate links from embedded JSON rather than anchors.
-  const urls=[...html.matchAll(/https?:\\?\/\\?\/[^"'< >]+/g)].map(m=>m[0].replace(/\\\//g,'/'));
-  for(const href of urls){if(/coupang|link\.coupang|inpock/i.test(href))items.push({title:'',href:decodeHtml(href)});}
+  const raw=html.replace(/\\u0026/g,'&').replace(/\\\//g,'/');
+  const urls=[...raw.matchAll(/(?:https?:\/\/|\/\/)?(?:[^\s"'<>]*coupang[^\s"'<>]*|link\.inpock\.co\.kr\/[^\s"'<>]*|moneying\.biz\/[^\s"'<>]*)/gi)].map(m=>normalizeUrl(m[0])).filter(Boolean);
+  for(const href of urls){if(/coupang|link\.coupang|inpock|moneying/i.test(href))items.push({title:'',href});}
   const seen=new Set();return items.filter(x=>{const k=`${x.title}|${x.href}`;if(seen.has(k))return false;seen.add(k);return true;});
 }
 
 async function resolveFinalUrl(url){
-  try{const r=await fetch(url,{method:'GET',headers:{'user-agent':UA},redirect:'follow',signal:AbortSignal.timeout(15000)});return r.url||url;}catch{return url;}
+  const normalized=normalizeUrl(url);if(!normalized)return '';
+  try{const r=await fetch(normalized,{method:'GET',headers:{'user-agent':UA},redirect:'follow',signal:AbortSignal.timeout(15000)});return r.url||normalized;}catch{return normalized;}
 }
 
 export async function matchInpockProduct({inpockUrl,caption='',transcript='',rewrittenScript=null}){
-  if(!inpockUrl)return null;
-  const catalog=await fetchInpockCatalog(inpockUrl);
+  const normalizedInpockUrl=normalizeUrl(inpockUrl);if(!normalizedInpockUrl)return null;
+  const catalog=await fetchInpockCatalog(normalizedInpockUrl);
   if(!catalog.length)return null;
   const explicit=[caption,transcript,...(rewrittenScript?.searchKeywords||[])].filter(Boolean).join(' ');
   const ranked=catalog.map(x=>({...x,score:scoreText(explicit,x.title)})).sort((a,b)=>b.score-a.score);
