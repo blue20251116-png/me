@@ -60,7 +60,8 @@ async function processPosts(ids){
 
 browserBridgeRouter.get('/targets',auth,(_req,res)=>{
   const items=db.prepare("SELECT id,target_value FROM social_monitor_targets WHERE enabled=1 AND platform='INSTAGRAM' AND target_type='ACCOUNT' ORDER BY created_at ASC").all();
-  res.json({items:items.map(x=>({id:x.id,username:x.target_value}))});
+  const knownReelIds=db.prepare("SELECT external_post_id FROM social_posts WHERE platform='INSTAGRAM' AND external_post_id IS NOT NULL AND external_post_id<>'' ORDER BY created_at DESC LIMIT 5000").all().map(x=>x.external_post_id).filter(validReelCode);
+  res.json({items:items.map(x=>({id:x.id,username:x.target_value})),knownReelIds,maxPerRun:MAX_PER_RUN});
 });
 
 browserBridgeRouter.get('/status',auth,(_req,res)=>res.json({ok:true,maxPerRun:MAX_PER_RUN,state:{...state}}));
@@ -89,7 +90,7 @@ browserBridgeRouter.post('/submit',auth,(req,res)=>{
     clean.sort((a,b)=>score(b)-score(a));
     const selected=clean.slice(0,MAX_PER_RUN);state.selected=selected.length;
     const ids=[];for(const x of selected){const id=save(x);if(id)ids.push(id);}
-    console.log(`[BrowserBridge] submit received=${input.length} eligible=${clean.length} selected=${ids.length} max=${MAX_PER_RUN} accounts=${num(diag.accountsChecked)} links=${num(diag.linksFound)} details=${num(diag.detailsTried)} videoUrl=${num(diag.videoUrlFound)} mirrored=${num(diag.mirrored)} mirrorFailed=${num(diag.mirrorFailed)}`);
+    console.log(`[BrowserBridge] submit received=${input.length} eligible=${clean.length} selected=${ids.length} max=${MAX_PER_RUN} accounts=${num(diag.accountsChecked)} links=${num(diag.linksFound)} details=${num(diag.detailsTried)} videoUrl=${num(diag.videoUrlFound)} mirrored=${num(diag.mirrored)} mirrorFailed=${num(diag.mirrorFailed)} skippedKnown=${num(diag.skippedKnown)}`);
     if(Array.isArray(diag.mirrorErrors)&&diag.mirrorErrors.length){for(const e of diag.mirrorErrors.slice(0,8))console.warn(`[BrowserBridge] mirrorError reel=${String(e?.reel||'-')} reason=${String(e?.reason||'').slice(0,220)}`);}
     if(ids.length)setImmediate(()=>processPosts(ids));
     res.status(202).json({ok:true,received:input.length,eligible:clean.length,selected:ids.length,postIds:ids,diagnostics:diag,message:ids.length?`상품 Reel ${ids.length}개를 저장했고 자동 분석을 시작했습니다`:'새로 저장할 Reel이 없습니다'});
