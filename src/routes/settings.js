@@ -2,7 +2,7 @@ import express from 'express';
 import { configuredServices, hasAdminPin, setAdminPin, setSecret, verifyAdminPin, settingsPersistenceInfo } from '../lib/settingsStore.js';
 export const settingsRouter=express.Router();
 const ALLOWED_KEYS=[
-  'OPENAI_API_KEY','SERPAPI_API_KEY',
+  'GEMINI_API_KEY','OPENAI_API_KEY','SERPAPI_API_KEY',
   'COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY','COUPANG_SUB_ID',
   'INSTAGRAM_SESSION_ID','INSTAGRAM_CSRF_TOKEN','PUBLIC_BASE_URL'
 ];
