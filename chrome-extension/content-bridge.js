@@ -1,7 +1,7 @@
 (()=>{
   if(window.__ME_INSTAGRAM_BRIDGE_CONTENT__)return;
   window.__ME_INSTAGRAM_BRIDGE_CONTENT__=true;
-  function announce(){window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'READY',version:'1.1.7'},'*');}
+  function announce(){window.postMessage({source:'ME_INSTAGRAM_BRIDGE',type:'READY',version:'1.1.8'},'*');}
   announce();setTimeout(announce,500);setTimeout(announce,1500);
   window.addEventListener('message',async(event)=>{
     const msg=event.data||{};
