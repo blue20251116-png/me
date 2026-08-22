@@ -5,7 +5,7 @@ import { db, persistentDataRoot, activeDbPath } from '../db/db.js';
 
 const KEY_FILE=process.env.SETTINGS_KEY_FILE||path.join(persistentDataRoot,'.settings.key');
 const ALLOWED=new Set([
-  'OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','APIFY_API_TOKEN',
+  'GEMINI_API_KEY','OPENAI_API_KEY','PEXELS_API_KEY','YOUTUBE_API_KEY','SERPAPI_API_KEY','APIFY_API_TOKEN',
   'COUPANG_ACCESS_KEY','COUPANG_SECRET_KEY','COUPANG_SUB_ID',
   'DOUYIN_COLLECTOR_ENDPOINT','DOUYIN_COLLECTOR_TOKEN',
   'XIAOHONGSHU_COLLECTOR_ENDPOINT','XIAOHONGSHU_COLLECTOR_TOKEN',
@@ -25,4 +25,4 @@ export function setSecret(name,value){if(!ALLOWED.has(name))throw new Error('지
 export function getSecret(name){if(process.env[name])return process.env[name];const row=db.prepare('SELECT value FROM app_settings WHERE key=?').get(name);if(!row)return '';try{return decrypt(row.value)}catch{return '';}}
 export function hydrateSavedSettings(){for(const name of ALLOWED){if(process.env[name])continue;const row=db.prepare('SELECT value FROM app_settings WHERE key=?').get(name);if(!row)continue;try{const value=decrypt(row.value);if(value)process.env[name]=value;}catch{}}}
 export function settingsPersistenceInfo(){const persistentByEnv=Boolean(process.env.PERSISTENT_DATA_DIR||process.env.RAILWAY_VOLUME_MOUNT_PATH||process.env.DB_PATH||process.env.SETTINGS_KEY_FILE||process.env.SETTINGS_MASTER_KEY);return {persistentByEnv,dataRoot:persistentDataRoot,dbPath:activeDbPath,keyFile:envMasterKey()?'ENV:SETTINGS_MASTER_KEY':KEY_FILE};}
-export function configuredServices(){const apify=!!getSecret('APIFY_API_TOKEN');return {openai:!!getSecret('OPENAI_API_KEY'),pexels:!!getSecret('PEXELS_API_KEY'),youtube:!!getSecret('YOUTUBE_API_KEY'),serpapi:!!getSecret('SERPAPI_API_KEY'),apify,instagramSession:!!getSecret('INSTAGRAM_SESSION_ID'),coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),douyinCollector:apify||!!getSecret('DOUYIN_COLLECTOR_ENDPOINT'),xiaohongshuCollector:apify||!!getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'),publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')};}
+export function configuredServices(){const apify=!!getSecret('APIFY_API_TOKEN');const gemini=!!getSecret('GEMINI_API_KEY');return {gemini,openai:gemini,pexels:!!getSecret('PEXELS_API_KEY'),youtube:!!getSecret('YOUTUBE_API_KEY'),serpapi:!!getSecret('SERPAPI_API_KEY'),apify,instagramSession:!!getSecret('INSTAGRAM_SESSION_ID'),coupang:!!getSecret('COUPANG_ACCESS_KEY')&&!!getSecret('COUPANG_SECRET_KEY'),douyinCollector:apify||!!getSecret('DOUYIN_COLLECTOR_ENDPOINT'),xiaohongshuCollector:apify||!!getSecret('XIAOHONGSHU_COLLECTOR_ENDPOINT'),publicBaseUrl:!!getSecret('PUBLIC_BASE_URL')};}
