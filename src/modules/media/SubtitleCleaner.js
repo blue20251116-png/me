@@ -43,9 +43,21 @@ function outputCanvas(width,height){
   const ratio=Math.min(maxW/width,maxH/height);
   return {width:even(width*ratio),height:even(height*ratio),scaled:true};
 }
+function reusableOutput(out,inputPath){
+  try{
+    const outStat=fs.statSync(out),inStat=fs.statSync(inputPath);
+    return outStat.size>100*1024&&outStat.mtimeMs>=inStat.mtimeMs;
+  }catch{return false;}
+}
 
 export function cleanChineseSubtitles({postId,inputPath,mode='DELOGO',region=null}){
   if(!inputPath||!fs.existsSync(inputPath)) throw new Error('원본 영상 파일이 없습니다.');
+  const out=storagePath('clean',`${postId}-clean.mp4`);
+  fs.mkdirSync(path.dirname(out),{recursive:true});
+  if(reusableOutput(out,inputPath)){
+    console.log(`[SubtitleCleaner] reuse post=${postId} clean=${out}`);
+    return {outputPath:out,mode:String(mode).toUpperCase(),reused:true};
+  }
   const probed=probeVideo(inputPath);
   const canvas=outputCanvas(probed.width,probed.height);
   const width=canvas.width,height=canvas.height;
@@ -54,8 +66,6 @@ export function cleanChineseSubtitles({postId,inputPath,mode='DELOGO',region=nul
   const w=clamp(Number(safe.w??Math.round(width*0.92)),2,width-x);
   const h=clamp(Number(safe.h??Math.round(height*0.20)),2,height-2);
   const y=clamp(Number(safe.y??Math.round(height*0.74)),0,height-h);
-  const out=storagePath('clean',`${postId}-clean.mp4`);
-  fs.mkdirSync(path.dirname(out),{recursive:true});
 
   const filters=[];
   if(canvas.scaled)filters.push(`scale=${width}:${height}:flags=lanczos`);
@@ -80,5 +90,5 @@ export function cleanChineseSubtitles({postId,inputPath,mode='DELOGO',region=nul
     const detail=r.error?.message||String(r.stderr||'').slice(-900)||`status=${r.status}`;
     throw new Error(`자막 제거 ffmpeg 실패: ${detail}`);
   }
-  return {outputPath:out,mode:String(mode).toUpperCase(),region:{x,y,w,h},width,height,sourceWidth:probed.width,sourceHeight:probed.height,fps:probed.fps,probeMethod:probed.method,downscaled:canvas.scaled};
+  return {outputPath:out,mode:String(mode).toUpperCase(),region:{x,y,w,h},width,height,sourceWidth:probed.width,sourceHeight:probed.height,fps:probed.fps,probeMethod:probed.method,downscaled:canvas.scaled,reused:false};
 }
