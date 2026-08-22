@@ -90,6 +90,7 @@ browserBridgeRouter.post('/submit',auth,(req,res)=>{
     const selected=clean.slice(0,MAX_PER_RUN);state.selected=selected.length;
     const ids=[];for(const x of selected){const id=save(x);if(id)ids.push(id);}
     console.log(`[BrowserBridge] submit received=${input.length} eligible=${clean.length} selected=${ids.length} max=${MAX_PER_RUN} accounts=${num(diag.accountsChecked)} links=${num(diag.linksFound)} details=${num(diag.detailsTried)} videoUrl=${num(diag.videoUrlFound)} mirrored=${num(diag.mirrored)} mirrorFailed=${num(diag.mirrorFailed)}`);
+    if(Array.isArray(diag.mirrorErrors)&&diag.mirrorErrors.length){for(const e of diag.mirrorErrors.slice(0,8))console.warn(`[BrowserBridge] mirrorError reel=${String(e?.reel||'-')} reason=${String(e?.reason||'').slice(0,220)}`);}
     if(ids.length)setImmediate(()=>processPosts(ids));
     res.status(202).json({ok:true,received:input.length,eligible:clean.length,selected:ids.length,postIds:ids,diagnostics:diag,message:ids.length?`상품 Reel ${ids.length}개를 저장했고 자동 분석을 시작했습니다`:'새로 저장할 Reel이 없습니다'});
   }catch(err){res.status(400).json({error:String(err?.message||err)});}
